@@ -6,10 +6,7 @@ import { GoogleAuthRequiredError } from "@/lib/gcalendar/client";
 import { createEvent } from "@/lib/gcalendar/create";
 import { listEvents } from "@/lib/gcalendar/sync";
 import type { CalendarEvent } from "@/lib/gcalendar/types";
-
-export type ActionResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; code: "auth_required" | "invalid_input" | "unknown"; message: string };
+import type { ActionResult } from "@/lib/actions/result";
 
 const listEventsSchema = z.object({
   timeMin: z.string().datetime(),
