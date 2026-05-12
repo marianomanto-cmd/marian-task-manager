@@ -22,7 +22,8 @@ export function LoginButton() {
       provider: "google",
       options: {
         redirectTo,
-        scopes: "openid email profile https://www.googleapis.com/auth/gmail.readonly",
+        scopes:
+          "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.events",
         queryParams: {
           access_type: "offline",
           prompt: "consent",
