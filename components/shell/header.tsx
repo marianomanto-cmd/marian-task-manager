@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { MeetingAlertBanner } from "@/components/calendar/meeting-alert-banner";
 import { TimezoneClocks } from "@/components/shell/timezone-clocks";
 import { UserMenu } from "@/components/shell/user-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -36,6 +37,7 @@ export function Header({ user }: HeaderProps) {
       <div className="border-t md:hidden">
         <TimezoneClocks variant="compact" className="px-4 py-1.5" />
       </div>
+      <MeetingAlertBanner />
     </header>
   );
 }
