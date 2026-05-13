@@ -48,6 +48,7 @@ export type Email = {
   has_attachments: boolean;
   attachments_meta: EmailAttachment[] | null;
   is_archived: boolean;
+  is_read: boolean;
   created_at: string;
   ai: EmailAi | null;
 };

@@ -17,6 +17,7 @@ export type ParsedMessage = {
   received_at: string;
   has_attachments: boolean;
   attachments_meta: EmailAttachment[];
+  is_read: boolean;
 };
 
 /**
@@ -41,11 +42,6 @@ export type HistoryDelta = {
   latestHistoryId: string | null;
 };
 
-/**
- * Incremental sync: returns message ids added since `startHistoryId` and
- * the new cursor to persist. Falls back to a fresh list when Gmail rejects
- * the cursor as too old (404 / errors mentioning historyId).
- */
 export async function listMessageIdsFromHistory(
   startHistoryId: string,
 ): Promise<HistoryDelta | { reset: true; reason: string }> {
@@ -70,8 +66,6 @@ export async function listMessageIdsFromHistory(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // Gmail invalidates historyId after ~7 days; we fall back to a fresh
-    // pull rather than fail the sync outright.
     if (
       message.includes("historyId") ||
       message.includes("404") ||
@@ -89,10 +83,6 @@ export async function getCurrentHistoryId(): Promise<string | null> {
   return data.historyId ?? null;
 }
 
-/**
- * Fetches the metadata + a body preview for one message and normalizes the
- * Gmail payload into the shape we persist.
- */
 export async function getMessage(
   messageId: string,
 ): Promise<ParsedMessage | null> {
@@ -125,6 +115,8 @@ export function parseMessage(
 
   const attachments_meta = collectAttachments(msg.payload ?? null);
   const body_preview = extractBodyPreview(msg.payload ?? null);
+  const labelIds = msg.labelIds ?? [];
+  const is_read = !labelIds.includes("UNREAD");
 
   return {
     gmail_message_id: msg.id,
@@ -137,6 +129,7 @@ export function parseMessage(
     received_at,
     has_attachments: attachments_meta.length > 0,
     attachments_meta,
+    is_read,
   };
 }
 
@@ -220,8 +213,6 @@ function extractBodyPreview(
 ): string | null {
   if (!payload) return null;
 
-  // Prefer text/plain anywhere in the tree, then text/html stripped, then
-  // the payload body itself if it's a single-part message.
   const plain = findPart(payload, "text/plain");
   if (plain?.body?.data) {
     return truncate(decodeBase64Url(plain.body.data));
