@@ -3,11 +3,18 @@
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/result";
-import type { Email } from "@/lib/gmail/types";
+import type { Email, EmailAi } from "@/lib/gmail/types";
 import { createClient } from "@/lib/supabase/server";
 
-const SELECT_COLUMNS =
-  "id, user_id, gmail_message_id, gmail_thread_id, project_id, sender_name, sender_email, subject, snippet, body_preview, received_at, has_attachments, attachments_meta, is_archived, created_at";
+const AI_COLUMNS =
+  "email_id, category, summary, priority, campaign_code, detected_deadline, suggested_action, requires_response, model_version, prompt_version, processed_at";
+
+const SELECT_COLUMNS = `
+  id, user_id, gmail_message_id, gmail_thread_id, project_id,
+  sender_name, sender_email, subject, snippet, body_preview,
+  received_at, has_attachments, attachments_meta, is_archived, created_at,
+  ai:email_ai(${AI_COLUMNS})
+`;
 
 const listSchema = z.object({
   archived: z.boolean().optional(),
@@ -53,6 +60,23 @@ function asUnknown(err: unknown): ActionResult<never> {
   };
 }
 
+/**
+ * Supabase returns embedded one-to-one relationships either as a single
+ * object or as an array depending on the FK direction. Normalize to a
+ * plain `ai: EmailAi | null` so the UI doesn't have to switch on shape.
+ */
+function normalizeEmailRow(raw: unknown): Email {
+  const r = raw as Record<string, unknown>;
+  const aiField = r.ai;
+  let ai: EmailAi | null = null;
+  if (Array.isArray(aiField)) {
+    ai = (aiField[0] as EmailAi | undefined) ?? null;
+  } else if (aiField && typeof aiField === "object") {
+    ai = aiField as EmailAi;
+  }
+  return { ...(r as Omit<Email, "ai">), ai };
+}
+
 export async function listEmailsAction(
   input: ListEmailsInput = {},
 ): Promise<ActionResult<Email[]>> {
@@ -77,7 +101,7 @@ export async function listEmailsAction(
 
     const { data, error } = await query;
     if (error) throw new Error(error.message);
-    return { ok: true, data: (data ?? []) as Email[] };
+    return { ok: true, data: (data ?? []).map(normalizeEmailRow) };
   } catch (err) {
     return asUnknown(err);
   }
@@ -102,7 +126,7 @@ export async function archiveEmailAction(
       .select(SELECT_COLUMNS)
       .single();
     if (error) throw new Error(error.message);
-    return { ok: true, data: data as Email };
+    return { ok: true, data: normalizeEmailRow(data) };
   } catch (err) {
     return asUnknown(err);
   }
@@ -113,10 +137,12 @@ export type LastSyncSummary = {
   durationMs: number | null;
   messagesInserted: number;
   messagesFetched: number;
+  messagesProcessedAi: number;
+  estimatedCostUsd: number;
   error: string | null;
 };
 
-/** Latest sync_log row for the current user, used to drive the inbox footer. */
+/** Latest sync_log row for the current user. Drives the inbox footer. */
 export async function getLastSyncAction(): Promise<
   ActionResult<LastSyncSummary | null>
 > {
@@ -128,7 +154,7 @@ export async function getLastSyncAction(): Promise<
     const { data, error } = await supabase
       .from("sync_log")
       .select(
-        "started_at, finished_at, messages_inserted, messages_fetched, error",
+        "started_at, finished_at, messages_inserted, messages_fetched, messages_processed_ai, estimated_cost_usd, error",
       )
       .eq("user_id", auth.userId)
       .order("started_at", { ascending: false })
@@ -150,6 +176,8 @@ export async function getLastSyncAction(): Promise<
         durationMs: finishedMs !== null ? finishedMs - startedMs : null,
         messagesInserted: data.messages_inserted ?? 0,
         messagesFetched: data.messages_fetched ?? 0,
+        messagesProcessedAi: data.messages_processed_ai ?? 0,
+        estimatedCostUsd: Number(data.estimated_cost_usd ?? 0),
         error: data.error ?? null,
       },
     };

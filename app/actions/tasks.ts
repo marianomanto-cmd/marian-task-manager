@@ -249,3 +249,97 @@ export async function deleteTaskAction(
     return asUnknown(err);
   }
 }
+
+function aiToTaskPriority(score: number | null | undefined): TaskPriority {
+  if (typeof score !== "number") return "medium";
+  if (score >= 70) return "high";
+  if (score < 30) return "low";
+  return "medium";
+}
+
+function deadlineToDueDate(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+function truncateTitle(s: string, max = 200): string {
+  if (s.length <= max) return s.trim();
+  // Cut at the last sentence boundary inside the budget, else hard cut.
+  const slice = s.slice(0, max);
+  const lastDot = slice.lastIndexOf(". ");
+  if (lastDot > max * 0.4) return `${slice.slice(0, lastDot + 1).trim()}`;
+  return `${slice.trim()}…`;
+}
+
+export async function convertEmailToTaskAction(
+  emailId: string,
+): Promise<ActionResult<Task>> {
+  const idSchema = z.string().uuid();
+  const parsed = idSchema.safeParse(emailId);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
+  const auth = await requireUserId();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+
+    // RLS already restricts to own emails; the explicit user_id filter is
+    // belt-and-suspenders.
+    const { data: email, error: emailErr } = await supabase
+      .from("emails")
+      .select(
+        "id, subject, snippet, body_preview, ai:email_ai(summary, priority, detected_deadline, suggested_action)",
+      )
+      .eq("id", parsed.data)
+      .eq("user_id", auth.userId)
+      .single();
+    if (emailErr) throw new Error(emailErr.message);
+    if (!email) throw new Error("Mail no encontrado.");
+
+    const aiField = email.ai;
+    const ai = Array.isArray(aiField)
+      ? (aiField[0] as {
+          summary: string | null;
+          priority: number | null;
+          detected_deadline: string | null;
+        } | undefined)
+      : (aiField as
+          | {
+              summary: string | null;
+              priority: number | null;
+              detected_deadline: string | null;
+            }
+          | null
+          | undefined);
+
+    const title = truncateTitle(
+      (ai?.summary && ai.summary.length > 0
+        ? ai.summary
+        : email.subject) ?? "(sin asunto)",
+    );
+    const priority = aiToTaskPriority(ai?.priority);
+    const due_date = deadlineToDueDate(ai?.detected_deadline);
+    const notes =
+      (email.snippet ?? email.body_preview ?? "").slice(0, 1000) || null;
+
+    const { data: created, error: insertErr } = await supabase
+      .from("tasks")
+      .insert({
+        user_id: auth.userId,
+        email_id: email.id,
+        title,
+        notes,
+        status: "todo",
+        priority,
+        due_date,
+      })
+      .select(SELECT_COLUMNS)
+      .single();
+    if (insertErr) throw new Error(insertErr.message);
+    return { ok: true, data: created as Task };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
