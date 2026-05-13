@@ -77,15 +77,15 @@ const PALETTE: Array<{ chipBg: string; chipText: string; barBg: string; barText:
 ];
 
 export const TEAM_MEMBERS: readonly TeamMember[] = [
-  { key: "sofi", name: "Sofi", email: "media@sangria.agency", colorIndex: 0 },
-  { key: "andre", name: "Andre", email: "andreyna.peraza@sangria.agency", colorIndex: 1 },
-  { key: "dave", name: "Dave", email: "david.lopez@sangria.agency", colorIndex: 2 },
-  { key: "chelo", name: "Chelo", email: "marcelo.boasso@sangria.agency", colorIndex: 3 },
-  { key: "herman", name: "Herman", email: "herman.grabosky@sangria.agency", colorIndex: 4 },
-  { key: "sergio", name: "Sergio", email: "sergio.barrientos@sangria.agency", colorIndex: 5 },
-  { key: "ine", name: "Ine", email: "ines.echavarria@sangria.agency", colorIndex: 6 },
-  { key: "axel", name: "Axel", email: "axel.nieves@sangria.agency", colorIndex: 7 },
-  { key: "marian", name: "Marian", email: "mariano.mantovani@sangria.agency", colorIndex: 8 },
+  { key: "sofi", name: "Sofi", email: "media@sangria.agency", colorIndex: 0, slackUserId: "U07SG4W9AP7" },
+  { key: "andre", name: "Andre", email: "andreyna.peraza@sangria.agency", colorIndex: 1, slackUserId: "U07RY5G37P0" },
+  { key: "dave", name: "Dave", email: "david.lopez@sangria.agency", colorIndex: 2, slackUserId: "U07QR4EFM1C" },
+  { key: "chelo", name: "Chelo", email: "marcelo.boasso@sangria.agency", colorIndex: 3, slackUserId: "U07P0A7SAQN" },
+  { key: "herman", name: "Herman", email: "herman.grabosky@sangria.agency", colorIndex: 4, slackUserId: "U07PKHT5BLZ" },
+  { key: "sergio", name: "Sergio", email: "sergio.barrientos@sangria.agency", colorIndex: 5, slackUserId: "U07PKK4KCQ1" },
+  { key: "ine", name: "Ine", email: "ines.echavarria@sangria.agency", colorIndex: 6, slackUserId: "U09ANM565AP" },
+  { key: "axel", name: "Axel", email: "axel.nieves@sangria.agency", colorIndex: 7, slackUserId: "U090JEBMP1B" },
+  { key: "marian", name: "Marian", email: "mariano.mantovani@sangria.agency", colorIndex: 8, slackUserId: "U07T1U03W8J" },
 ] as const;
 
 const BY_KEY = new Map<string, TeamMember>(
