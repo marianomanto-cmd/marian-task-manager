@@ -9,6 +9,7 @@ import {
   type ListEmailsInput,
 } from "@/app/actions/emails";
 import type { Email } from "@/lib/gmail/types";
+import { createClient } from "@/lib/supabase/client";
 
 export type EmailsQueryResult =
   | { emails: Email[]; authRequired: false; error: null }
@@ -25,6 +26,7 @@ export function emailsQueryKey(filter: ListEmailsInput) {
 
 export const EMAILS_INVALIDATION_KEY = ["emails"] as const;
 export const SYNC_LOG_INVALIDATION_KEY = ["last-sync"] as const;
+export const PENDING_AI_INVALIDATION_KEY = ["pending-ai"] as const;
 
 export function useEmails(
   filter: ListEmailsInput = {},
@@ -53,6 +55,26 @@ export function useLastSync(): UseQueryResult<LastSyncSummary | null> {
       const result = await getLastSyncAction();
       if (!result.ok) return null;
       return result.data;
+    },
+  });
+}
+
+/**
+ * Reads the count of emails not yet classified by Claude — drives the
+ * "Analizar (N)" button. RLS scopes it to the current user automatically.
+ */
+export function usePendingAiCount(): UseQueryResult<number> {
+  return useQuery({
+    queryKey: PENDING_AI_INVALIDATION_KEY,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const supabase = createClient();
+      const { count, error } = await supabase
+        .from("emails")
+        .select("id", { count: "exact", head: true })
+        .not("id", "in", `(select email_id from email_ai)`);
+      if (error) throw new Error(error.message);
+      return count ?? 0;
     },
   });
 }
