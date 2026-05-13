@@ -82,7 +82,7 @@ export const TEAM_MEMBERS: readonly TeamMember[] = [
   { key: "dave", name: "Dave", email: "david.lopez@sangria.agency", colorIndex: 2, slackUserId: "U07QR4EFM1C" },
   { key: "chelo", name: "Chelo", email: "marcelo.boasso@sangria.agency", colorIndex: 3, slackUserId: "U07P0A7SAQN" },
   { key: "herman", name: "Herman", email: "herman.grabosky@sangria.agency", colorIndex: 4, slackUserId: "U07PKHT5BLZ" },
-  { key: "sergio", name: "Sergio", email: "sergio.barrientos@sangria.agency", colorIndex: 5 },
+  { key: "sergio", name: "Sergio", email: "sergio.barrientos@sangria.agency", colorIndex: 5, slackUserId: "U07PKK4KCQ1" },
   { key: "ine", name: "Ine", email: "ines.echavarria@sangria.agency", colorIndex: 6, slackUserId: "U09ANM565AP" },
   { key: "axel", name: "Axel", email: "axel.nieves@sangria.agency", colorIndex: 7, slackUserId: "U090JEBMP1B" },
   { key: "marian", name: "Marian", email: "mariano.mantovani@sangria.agency", colorIndex: 8, slackUserId: "U07T1U03W8J" },
