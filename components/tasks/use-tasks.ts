@@ -16,6 +16,7 @@ export function tasksQueryKey(filter: ListTasksInput) {
     filter.statuses?.slice().sort().join(",") ?? "",
     filter.priorities?.slice().sort().join(",") ?? "",
     filter.archiveMode ?? "active",
+    filter.assignee_keys?.slice().sort().join(",") ?? "",
   ] as const;
 }
 

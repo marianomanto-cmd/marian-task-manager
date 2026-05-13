@@ -37,6 +37,7 @@ const listSchema = z.object({
   statuses: z.array(statusSchema).optional(),
   priorities: z.array(prioritySchema).optional(),
   archiveMode: archiveModeSchema.optional(),
+  assignee_keys: z.array(memberKeySchema).max(20).optional(),
 });
 
 const linkSchema = z.string().trim().max(2000);
@@ -245,6 +246,24 @@ export async function listTasksAction(
     }
     if (parsed.data.priorities && parsed.data.priorities.length > 0) {
       query = query.in("priority", parsed.data.priorities);
+    }
+
+    // Filter by assignee: pull matching task ids from task_assignees and
+    // restrict the main query. Tasks with no assignees are excluded when
+    // a filter is set — that matches the "show me my pending" intent.
+    if (parsed.data.assignee_keys && parsed.data.assignee_keys.length > 0) {
+      const { data: rows, error: aErr } = await supabase
+        .from("task_assignees")
+        .select("task_id")
+        .in("member_key", parsed.data.assignee_keys);
+      if (aErr) throw new Error(aErr.message);
+      const ids = Array.from(
+        new Set((rows ?? []).map((r) => r.task_id as string)),
+      );
+      if (ids.length === 0) {
+        return { ok: true, data: [] };
+      }
+      query = query.in("id", ids);
     }
 
     // Archive split: a task is "archived" when it was completed >7 days ago.

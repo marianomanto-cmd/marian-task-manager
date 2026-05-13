@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Archive, Kanban, List, ListChecks, Plus, RefreshCw } from "lucide-react";
 
+import { useCurrentUser } from "@/components/hooks/use-user";
 import { FilterChips } from "@/components/tasks/filter-chips";
 import { KanbanBoard } from "@/components/tasks/kanban-board";
 import { TaskForm } from "@/components/tasks/task-form";
@@ -20,6 +21,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "@/lib/tasks/types";
+import { TEAM_MEMBERS, getMemberByEmail } from "@/lib/team/members";
 import { cn } from "@/lib/utils";
 
 const STATUS_OPTIONS = TASK_STATUSES.map((s) => ({
@@ -29,6 +31,10 @@ const STATUS_OPTIONS = TASK_STATUSES.map((s) => ({
 const PRIORITY_OPTIONS = TASK_PRIORITIES.map((p) => ({
   value: p,
   label: TASK_PRIORITY_LABEL[p],
+}));
+const ASSIGNEE_OPTIONS = TEAM_MEMBERS.map((m) => ({
+  value: m.key,
+  label: m.name,
 }));
 
 const DEFAULT_STATUSES: TaskStatus[] = [...TASK_STATUSES];
@@ -41,11 +47,29 @@ export default function TasksPage() {
   const [statuses, setStatuses] = React.useState<TaskStatus[]>(DEFAULT_STATUSES);
   const [priorities, setPriorities] =
     React.useState<TaskPriority[]>(DEFAULT_PRIORITIES);
+  // null = "use the default (mine if I'm a member, otherwise everyone)".
+  // Once the user touches the chips we store an explicit array.
+  const [assigneeOverride, setAssigneeOverride] = React.useState<
+    string[] | null
+  >(null);
   const [archiveMode, setArchiveMode] = React.useState<"active" | "archive">(
     "active",
   );
   const [formOpen, setFormOpen] = React.useState(false);
   const [editingTask, setEditingTask] = React.useState<Task | null>(null);
+
+  const currentUser = useCurrentUser();
+  const currentMemberKey = React.useMemo(
+    () => getMemberByEmail(currentUser.data?.email)?.key ?? null,
+    [currentUser.data?.email],
+  );
+  const assignees =
+    assigneeOverride ?? (currentMemberKey ? [currentMemberKey] : []);
+  const setAssignees = (next: string[]) => setAssigneeOverride(next);
+  const isMineOnly =
+    currentMemberKey !== null &&
+    assignees.length === 1 &&
+    assignees[0] === currentMemberKey;
 
   // Kanban view always shows all open statuses — the columns ARE the filter.
   const effectiveStatuses = view === "kanban" ? [...TASK_STATUSES] : statuses;
@@ -54,6 +78,7 @@ export default function TasksPage() {
     statuses: effectiveStatuses,
     priorities,
     archiveMode,
+    assignee_keys: assignees,
   });
   const tasks = tasksQuery.data?.tasks ?? [];
 
@@ -135,29 +160,43 @@ export default function TasksPage() {
         </p>
       ) : null}
 
-      {view === "list" ? (
-        <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <FilterChips<string>
+            label="Asignado"
+            options={ASSIGNEE_OPTIONS}
+            selected={assignees}
+            onChange={setAssignees}
+          />
+          {currentMemberKey ? (
+            <Button
+              type="button"
+              size="sm"
+              variant={isMineOnly ? "default" : "ghost"}
+              onClick={() =>
+                setAssignees(isMineOnly ? [] : [currentMemberKey])
+              }
+              className="h-7 rounded-full px-2.5 text-xs"
+            >
+              {isMineOnly ? "Mostrar todas" : "Sólo mías"}
+            </Button>
+          ) : null}
+        </div>
+        {view === "list" ? (
           <FilterChips<TaskStatus>
             label="Estado"
             options={STATUS_OPTIONS}
             selected={statuses}
             onChange={setStatuses}
           />
-          <FilterChips<TaskPriority>
-            label="Prioridad"
-            options={PRIORITY_OPTIONS}
-            selected={priorities}
-            onChange={setPriorities}
-          />
-        </div>
-      ) : (
+        ) : null}
         <FilterChips<TaskPriority>
           label="Prioridad"
           options={PRIORITY_OPTIONS}
           selected={priorities}
           onChange={setPriorities}
         />
-      )}
+      </div>
 
       {tasksQuery.data?.authRequired ? (
         <p className="text-destructive text-sm" role="alert">
