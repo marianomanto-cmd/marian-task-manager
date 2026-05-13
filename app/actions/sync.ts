@@ -1,5 +1,7 @@
 "use server";
 
+import { batchClassify } from "@/lib/anthropic/classify";
+import type { ActionResult } from "@/lib/actions/result";
 import { GoogleAuthRequiredError } from "@/lib/google/auth";
 import {
   getCurrentHistoryId,
@@ -7,19 +9,23 @@ import {
   listInitialMessageIds,
   listMessageIdsFromHistory,
 } from "@/lib/gmail/sync";
-import type { ActionResult } from "@/lib/actions/result";
 import { createClient } from "@/lib/supabase/server";
 
 const RATE_LIMIT_MS = 20_000;
 const INITIAL_PULL_SIZE = 50;
 const MAX_MESSAGES_PER_SYNC = 100;
 const FETCH_BATCH_SIZE = 10;
+const MAX_AI_PER_SYNC = 30;
+const AI_BATCH_SIZE = 10;
 
 export type SyncResult = {
   syncLogId: string;
   fetched: number;
   inserted: number;
   skipped: number;
+  aiProcessed: number;
+  aiPending: number;
+  aiCostUsd: number;
   resetHistory: boolean;
   durationMs: number;
 };
@@ -37,8 +43,6 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
     };
   }
 
-  // Ensure the user_settings row exists. This is idempotent — the first run
-  // creates it, every later run is a no-op upsert.
   const upsert = await supabase
     .from("user_settings")
     .upsert({ user_id: user.id }, { onConflict: "user_id" });
@@ -55,7 +59,6 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
     return { ok: false, code: "unknown", message: readErr.message };
   }
 
-  // Server-side rate limit on top of the client-side 30s on the button.
   if (settings?.last_synced_at) {
     const elapsed = Date.now() - new Date(settings.last_synced_at).getTime();
     if (elapsed < RATE_LIMIT_MS) {
@@ -68,8 +71,6 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
     }
   }
 
-  // Open the audit row before doing any external IO so a half-failed sync
-  // still leaves a record.
   const { data: syncLogRow, error: openErr } = await supabase
     .from("sync_log")
     .insert({ user_id: user.id })
@@ -105,9 +106,7 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
       }
     }
 
-    // 2. Skip the Gmail.get round-trip for ids we already have. This is the
-    //    second layer of the anti-loop guarantee — even if Gmail history
-    //    returns dupes, we still won't fetch them twice.
+    // 2. Skip the Gmail.get round-trip for ids we already have.
     let toFetch: string[] = [];
     if (messageIds.length > 0) {
       const { data: existing } = await supabase
@@ -132,8 +131,7 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
       for (const r of results) if (r) parsed.push(r);
     }
 
-    // 4. Insert all new rows in a single statement; the (user_id,
-    //    gmail_message_id) unique constraint is the third anti-loop layer.
+    // 4. Insert all new rows in a single statement.
     let inserted = 0;
     if (parsed.length > 0) {
       const { data: rows, error: insertErr } = await supabase
@@ -158,9 +156,7 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
       inserted = rows?.length ?? 0;
     }
 
-    // 5. Persist the new cursor. After an initial pull or a reset we
-    //    ask Gmail for the current historyId directly; for the incremental
-    //    path the delta call already returned it.
+    // 5. Persist the new cursor.
     if (!nextHistoryId) {
       nextHistoryId = await getCurrentHistoryId();
     }
@@ -172,7 +168,12 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
       })
       .eq("user_id", user.id);
 
-    // 6. Close the audit row.
+    // 6. AI classification (best-effort). The LEFT JOIN ... IS NULL pattern
+    //    is the fourth anti-loop layer — already-classified emails never
+    //    enter this query.
+    const aiOutcome = await classifyPendingEmails(supabase, user.id);
+
+    // 7. Close the audit row.
     const durationMs = Date.now() - startedAt;
     await supabase
       .from("sync_log")
@@ -181,6 +182,11 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
         messages_fetched: messageIds.length,
         messages_inserted: inserted,
         messages_skipped_already_processed: skipped,
+        messages_processed_ai: aiOutcome.processed,
+        total_tokens_input: aiOutcome.tokensInput,
+        total_tokens_output: aiOutcome.tokensOutput,
+        estimated_cost_usd: aiOutcome.estimatedCostUsd,
+        error: aiOutcome.errorSummary ?? null,
       })
       .eq("id", syncLogId);
 
@@ -191,6 +197,9 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
         fetched: messageIds.length,
         inserted,
         skipped,
+        aiProcessed: aiOutcome.processed,
+        aiPending: aiOutcome.pending,
+        aiCostUsd: aiOutcome.estimatedCostUsd,
         resetHistory,
         durationMs,
       },
@@ -211,4 +220,123 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
     }
     return { ok: false, code: "unknown", message };
   }
+}
+
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+type AiOutcome = {
+  processed: number;
+  pending: number;
+  tokensInput: number;
+  tokensOutput: number;
+  estimatedCostUsd: number;
+  errorSummary: string | null;
+};
+
+async function classifyPendingEmails(
+  supabase: SupabaseServerClient,
+  userId: string,
+): Promise<AiOutcome> {
+  const empty: AiOutcome = {
+    processed: 0,
+    pending: 0,
+    tokensInput: 0,
+    tokensOutput: 0,
+    estimatedCostUsd: 0,
+    errorSummary: null,
+  };
+
+  // Total pending — for the "X mails pendientes" UI hint.
+  const { count: pendingCount } = await supabase
+    .from("emails")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .not(
+      "id",
+      "in",
+      `(select email_id from email_ai)`,
+    );
+
+  // Fetch up to MAX_AI_PER_SYNC pending rows. We use a two-step query
+  // because supabase-js doesn't expose LEFT JOIN ... IS NULL natively;
+  // the .not('id','in','(...)') subquery is equivalent.
+  const { data: pendingRows, error } = await supabase
+    .from("emails")
+    .select(
+      "id, sender_name, sender_email, subject, snippet, body_preview, received_at",
+    )
+    .eq("user_id", userId)
+    .not("id", "in", `(select email_id from email_ai)`)
+    .order("received_at", { ascending: false })
+    .limit(MAX_AI_PER_SYNC);
+
+  if (error) {
+    return { ...empty, errorSummary: `AI fetch: ${error.message}` };
+  }
+  const rows = pendingRows ?? [];
+  if (rows.length === 0) {
+    return { ...empty, pending: pendingCount ?? 0 };
+  }
+
+  const inputs = rows.map((r) => ({
+    id: r.id,
+    from: r.sender_name
+      ? `${r.sender_name} <${r.sender_email ?? ""}>`
+      : (r.sender_email ?? "unknown"),
+    subject: r.subject ?? "",
+    body_preview: r.body_preview ?? r.snippet ?? "",
+  }));
+
+  let outcome;
+  try {
+    outcome = await batchClassify(inputs, AI_BATCH_SIZE);
+  } catch (err) {
+    return {
+      ...empty,
+      pending: pendingCount ?? rows.length,
+      errorSummary: `AI: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  if (outcome.results.length > 0) {
+    const insertRows = outcome.results.map((r) => ({
+      email_id: r.id,
+      category: r.category,
+      summary: r.summary,
+      priority: r.priority,
+      campaign_code: r.campaign_code,
+      detected_deadline: r.detected_deadline,
+      suggested_action: r.suggested_action,
+      requires_response: r.requires_response,
+      model_version: outcome.modelVersion,
+      prompt_version: outcome.promptVersion,
+      tokens_input: 0, // per-row token split isn't returned by the API;
+      tokens_output: 0, // aggregate goes on sync_log instead.
+    }));
+    const { error: insertErr } = await supabase
+      .from("email_ai")
+      .upsert(insertRows, { onConflict: "email_id", ignoreDuplicates: true });
+    if (insertErr) {
+      return {
+        ...empty,
+        pending: pendingCount ?? rows.length,
+        errorSummary: `AI insert: ${insertErr.message}`,
+      };
+    }
+  }
+
+  const failedSummary =
+    outcome.failedBatches.length > 0
+      ? `AI batches failed: ${outcome.failedBatches.map((b) => b.error).join(" | ")}`
+      : null;
+
+  const processed = outcome.results.length;
+  return {
+    processed,
+    pending: Math.max((pendingCount ?? rows.length) - processed, 0),
+    tokensInput: outcome.tokensInput,
+    tokensOutput: outcome.tokensOutput,
+    estimatedCostUsd: outcome.estimatedCostUsd,
+    errorSummary: failedSummary,
+  };
 }
