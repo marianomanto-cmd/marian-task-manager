@@ -115,27 +115,65 @@ function buildText(event: TaskEvent): string {
   }
 }
 
+async function slackCall<T extends { ok: boolean; error?: string }>(
+  token: string,
+  method: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const res = await fetch(`https://slack.com/api/${method}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+  return (await res.json()) as T;
+}
+
 async function postDM(userId: string, text: string): Promise<void> {
   const token = process.env.SLACK_BOT_TOKEN;
   if (!token) return;
   try {
-    const res = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        channel: userId,
-        text,
-        mrkdwn: true,
-        unfurl_links: false,
-        unfurl_media: false,
-      }),
+    // Two-step: open (or reuse) the IM channel, then post. This is the
+    // pattern Slack documents as most reliable for bot DMs.
+    const open = await slackCall<{
+      ok: boolean;
+      error?: string;
+      needed?: string;
+      provided?: string;
+      channel?: { id: string };
+    }>(token, "conversations.open", { users: userId });
+    if (!open.ok || !open.channel?.id) {
+      console.error("[slack] conversations.open failed", {
+        userId,
+        error: open.error,
+        needed: open.needed,
+        provided: open.provided,
+      });
+      return;
+    }
+
+    const post = await slackCall<{
+      ok: boolean;
+      error?: string;
+      needed?: string;
+      provided?: string;
+    }>(token, "chat.postMessage", {
+      channel: open.channel.id,
+      text,
+      mrkdwn: true,
+      unfurl_links: false,
+      unfurl_media: false,
     });
-    const json = (await res.json()) as { ok: boolean; error?: string };
-    if (!json.ok) {
-      console.error("[slack] DM failed", { userId, error: json.error });
+    if (!post.ok) {
+      console.error("[slack] chat.postMessage failed", {
+        userId,
+        channel: open.channel.id,
+        error: post.error,
+        needed: post.needed,
+        provided: post.provided,
+      });
     }
   } catch (err) {
     console.error("[slack] DM error", err);
