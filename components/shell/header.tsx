@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { MeetingAlertBanner } from "@/components/calendar/meeting-alert-banner";
+import { ActivityTrigger } from "@/components/shell/activity-trigger";
 import { TimezoneClocks } from "@/components/shell/timezone-clocks";
 import { UserMenu } from "@/components/shell/user-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -29,6 +30,7 @@ export function Header({ isAdmin, user }: HeaderProps) {
 
         <div className="ml-auto flex items-center gap-2 md:gap-4">
           <TimezoneClocks variant="header" />
+          <ActivityTrigger />
           <ThemeToggle />
           <UserMenu
             email={user.email}

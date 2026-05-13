@@ -15,6 +15,8 @@ export type Task = {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  /** team_members keys assigned to this task. */
+  assignees: string[];
 };
 
 export const TASK_STATUSES: readonly TaskStatus[] = [
