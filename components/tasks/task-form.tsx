@@ -40,6 +40,7 @@ const formSchema = z.object({
     .regex(dateRegex)
     .optional()
     .or(z.literal("")),
+  link: z.string().trim().max(2000).optional(),
   assignee_keys: z.array(z.string()).default([]),
 });
 
@@ -52,6 +53,7 @@ function defaults(entry: Task | null | undefined): FormState {
     status: entry?.status ?? "todo",
     priority: entry?.priority ?? "medium",
     due_date: entry?.due_date ?? "",
+    link: entry?.link ?? "",
     assignee_keys: entry?.assignees ?? [],
   };
 }
@@ -86,6 +88,7 @@ export function TaskForm({ task, onSaved, onDeleted, onCancel }: TaskFormProps) 
         priority: input.priority,
         due_date:
           input.due_date && input.due_date.length > 0 ? input.due_date : null,
+        link: input.link && input.link.length > 0 ? input.link : null,
         assignee_keys: input.assignee_keys,
       };
       const result = task
@@ -240,6 +243,19 @@ export function TaskForm({ task, onSaved, onDeleted, onCancel }: TaskFormProps) 
             value={state.due_date ?? ""}
             onChange={(e) =>
               setState((prev) => ({ ...prev, due_date: e.target.value }))
+            }
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="task-link">Link</Label>
+          <Input
+            id="task-link"
+            type="url"
+            placeholder="https://drive.google.com/…"
+            value={state.link ?? ""}
+            onChange={(e) =>
+              setState((prev) => ({ ...prev, link: e.target.value }))
             }
           />
         </div>

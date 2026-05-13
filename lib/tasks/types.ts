@@ -15,6 +15,8 @@ export type Task = {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Optional free-form URL (Drive, Notion, Figma…). */
+  link: string | null;
   /** team_members keys assigned to this task. */
   assignees: string[];
 };
