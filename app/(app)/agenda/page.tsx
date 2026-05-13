@@ -275,17 +275,22 @@ export default function AgendaPage() {
                   entry.start_date > rowStart ? entry.start_date : rowStart;
                 const showLabel = key === labelStart;
                 return (
-                  <span
+                  <button
                     key={entry.id}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEdit(entry);
+                    }}
                     title={`${entry.member_name}${entry.reason ? ` — ${entry.reason}` : ""}`}
                     className={cn(
-                      "block truncate rounded px-1 py-0.5 text-[10px] font-medium leading-tight",
+                      "block w-full truncate rounded px-1 py-0.5 text-left text-[10px] font-medium leading-tight",
                       color.bar,
                       color.text,
                     )}
                   >
                     {showLabel ? entry.member_name : " "}
-                  </span>
+                  </button>
                 );
               })}
             </>

@@ -1,5 +1,6 @@
 import {
   Calendar,
+  CalendarDays,
   FolderKanban,
   Inbox,
   ListChecks,
@@ -7,7 +8,7 @@ import {
 } from "lucide-react";
 
 export type NavItem = {
-  href: "/inbox" | "/tasks" | "/calendar" | "/projects";
+  href: "/inbox" | "/tasks" | "/calendar" | "/agenda" | "/projects";
   label: string;
   icon: LucideIcon;
 };
@@ -16,5 +17,6 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/inbox", label: "Bandeja", icon: Inbox },
   { href: "/tasks", label: "Tareas", icon: ListChecks },
   { href: "/calendar", label: "Calendario", icon: Calendar },
+  { href: "/agenda", label: "Agenda", icon: CalendarDays },
   { href: "/projects", label: "Proyectos", icon: FolderKanban },
 ] as const;
