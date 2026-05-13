@@ -62,6 +62,12 @@ const PALETTE: Array<{ chipBg: string; chipText: string; barBg: string; barText:
     barBg: "bg-orange-500/80",
     barText: "text-orange-50",
   },
+  {
+    chipBg: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-200 border-indigo-500/40",
+    chipText: "text-indigo-700",
+    barBg: "bg-indigo-500/80",
+    barText: "text-indigo-50",
+  },
 ];
 
 export const TEAM_MEMBERS: readonly TeamMember[] = [
@@ -73,6 +79,7 @@ export const TEAM_MEMBERS: readonly TeamMember[] = [
   { key: "sergio", name: "Sergio", email: "sergio.barrientos@sangria.agency", colorIndex: 5 },
   { key: "ine", name: "Ine", email: "ines.echavarria@sangria.agency", colorIndex: 6 },
   { key: "axel", name: "Axel", email: "axel.nieves@sangria.agency", colorIndex: 7 },
+  { key: "marian", name: "Marian", email: "mariano.mantovani@sangria.agency", colorIndex: 8 },
 ] as const;
 
 const BY_KEY = new Map<string, TeamMember>(
