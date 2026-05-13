@@ -22,25 +22,31 @@ import { Button } from "@/components/ui/button";
 import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
 import { HOLIDAY_COUNTRY_META, type Holiday } from "@/lib/holidays/types";
 import type { OooEntry } from "@/lib/ooo/types";
+import { colorForMemberKey, TEAM_MEMBERS } from "@/lib/team/members";
 import { cn } from "@/lib/utils";
 
 const WEEK_STARTS_ON = 1 as const;
 
-const MEMBER_PALETTE: Array<{ bar: string; text: string }> = [
-  { bar: "bg-sky-500/80", text: "text-sky-50" },
-  { bar: "bg-emerald-500/80", text: "text-emerald-50" },
-  { bar: "bg-amber-500/80", text: "text-amber-50" },
-  { bar: "bg-rose-500/80", text: "text-rose-50" },
-  { bar: "bg-violet-500/80", text: "text-violet-50" },
-  { bar: "bg-teal-500/80", text: "text-teal-50" },
-];
-
-function memberColor(name: string): { bar: string; text: string } {
-  let hash = 0;
-  for (let i = 0; i < name.length; i += 1) {
-    hash = (hash * 31 + name.charCodeAt(i)) | 0;
+/**
+ * Try to match the free-text member name to a known team member by display
+ * name; falls back to a hash so unknown names still get a stable color.
+ */
+function memberColor(memberName: string): { bar: string; text: string } {
+  const found = TEAM_MEMBERS.find(
+    (m) => m.name.toLowerCase() === memberName.trim().toLowerCase(),
+  );
+  if (found) {
+    const c = colorForMemberKey(found.key);
+    return { bar: c.barBg, text: c.barText };
   }
-  return MEMBER_PALETTE[Math.abs(hash) % MEMBER_PALETTE.length];
+  // Stable fallback hash for free-text names.
+  let hash = 0;
+  for (let i = 0; i < memberName.length; i += 1) {
+    hash = (hash * 31 + memberName.charCodeAt(i)) | 0;
+  }
+  const fakeKey = TEAM_MEMBERS[Math.abs(hash) % TEAM_MEMBERS.length].key;
+  const c = colorForMemberKey(fakeKey);
+  return { bar: c.barBg, text: c.barText };
 }
 
 function buildHolidayIndex(holidays: Holiday[]): Map<string, Holiday[]> {
@@ -147,7 +153,7 @@ export default function AgendaPage() {
   const refreshing = holidaysQuery.isFetching || oooQuery.isFetching;
 
   return (
-    <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
+    <section className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
           {format(monthAnchor, "MMMM yyyy", { locale: es }).replace(/^\w/, (c) =>

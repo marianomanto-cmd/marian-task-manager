@@ -95,7 +95,7 @@ export default function InboxPage() {
     : "Todavía no sincronizaste";
 
   return (
-    <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
+    <section className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
