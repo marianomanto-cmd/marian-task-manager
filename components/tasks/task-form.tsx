@@ -9,6 +9,9 @@ import {
   deleteTaskAction,
   updateTaskAction,
 } from "@/app/actions/tasks";
+import { useCurrentUser } from "@/components/hooks/use-user";
+import { AssigneePicker } from "@/components/tasks/assignee-picker";
+import { TaskComments } from "@/components/tasks/task-comments";
 import { TASKS_INVALIDATION_KEY } from "@/components/tasks/use-tasks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +40,7 @@ const formSchema = z.object({
     .regex(dateRegex)
     .optional()
     .or(z.literal("")),
+  assignee_keys: z.array(z.string()).default([]),
 });
 
 type FormState = z.infer<typeof formSchema>;
@@ -48,6 +52,7 @@ function defaults(entry: Task | null | undefined): FormState {
     status: entry?.status ?? "todo",
     priority: entry?.priority ?? "medium",
     due_date: entry?.due_date ?? "",
+    assignee_keys: entry?.assignees ?? [],
   };
 }
 
@@ -66,6 +71,7 @@ const selectClasses = cn(
 export function TaskForm({ task, onSaved, onDeleted, onCancel }: TaskFormProps) {
   const isEdit = Boolean(task);
   const queryClient = useQueryClient();
+  const currentUser = useCurrentUser();
   const [state, setState] = React.useState<FormState>(() => defaults(task));
   const [fieldErrors, setFieldErrors] = React.useState<
     Partial<Record<keyof FormState | "form", string>>
@@ -78,7 +84,9 @@ export function TaskForm({ task, onSaved, onDeleted, onCancel }: TaskFormProps) 
         notes: input.notes?.length ? input.notes : null,
         status: input.status,
         priority: input.priority,
-        due_date: input.due_date && input.due_date.length > 0 ? input.due_date : null,
+        due_date:
+          input.due_date && input.due_date.length > 0 ? input.due_date : null,
+        assignee_keys: input.assignee_keys,
       };
       const result = task
         ? await updateTaskAction({ id: task.id, ...payload })
@@ -87,7 +95,10 @@ export function TaskForm({ task, onSaved, onDeleted, onCancel }: TaskFormProps) 
       return result.data;
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: TASKS_INVALIDATION_KEY });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: TASKS_INVALIDATION_KEY }),
+        queryClient.invalidateQueries({ queryKey: ["activity"] }),
+      ]);
       onSaved?.();
     },
     onError: (err: Error) => {
@@ -103,7 +114,10 @@ export function TaskForm({ task, onSaved, onDeleted, onCancel }: TaskFormProps) 
       return result.data;
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: TASKS_INVALIDATION_KEY });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: TASKS_INVALIDATION_KEY }),
+        queryClient.invalidateQueries({ queryKey: ["activity"] }),
+      ]);
       onDeleted?.();
     },
     onError: (err: Error) => {
@@ -132,131 +146,151 @@ export function TaskForm({ task, onSaved, onDeleted, onCancel }: TaskFormProps) 
   const submitting = saveMutation.isPending || deleteMutation.isPending;
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <div className="space-y-1.5">
-        <Label htmlFor="task-title">Título</Label>
-        <Input
-          id="task-title"
-          value={state.title}
-          onChange={(e) =>
-            setState((prev) => ({ ...prev, title: e.target.value }))
-          }
-          placeholder="¿Qué hay que hacer?"
-          aria-invalid={Boolean(fieldErrors.title)}
-          required
-        />
-        {fieldErrors.title ? (
-          <p className="text-destructive text-xs">{fieldErrors.title}</p>
-        ) : null}
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="task-notes">Notas</Label>
-        <Textarea
-          id="task-notes"
-          value={state.notes ?? ""}
-          onChange={(e) =>
-            setState((prev) => ({ ...prev, notes: e.target.value }))
-          }
-          placeholder="Detalles, links, contexto…"
-          rows={3}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className="flex flex-col gap-4">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="task-status">Estado</Label>
-          <select
-            id="task-status"
-            value={state.status}
+          <Label htmlFor="task-title">Título</Label>
+          <Input
+            id="task-title"
+            value={state.title}
             onChange={(e) =>
-              setState((prev) => ({
-                ...prev,
-                status: e.target.value as TaskStatus,
-              }))
+              setState((prev) => ({ ...prev, title: e.target.value }))
             }
-            className={selectClasses}
-          >
-            {TASK_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {TASK_STATUS_LABEL[s]}
-              </option>
-            ))}
-          </select>
+            placeholder="¿Qué hay que hacer?"
+            aria-invalid={Boolean(fieldErrors.title)}
+            required
+          />
+          {fieldErrors.title ? (
+            <p className="text-destructive text-xs">{fieldErrors.title}</p>
+          ) : null}
         </div>
+
         <div className="space-y-1.5">
-          <Label htmlFor="task-priority">Prioridad</Label>
-          <select
-            id="task-priority"
-            value={state.priority}
+          <Label htmlFor="task-notes">Notas</Label>
+          <Textarea
+            id="task-notes"
+            value={state.notes ?? ""}
             onChange={(e) =>
-              setState((prev) => ({
-                ...prev,
-                priority: e.target.value as TaskPriority,
-              }))
+              setState((prev) => ({ ...prev, notes: e.target.value }))
             }
-            className={selectClasses}
-          >
-            {TASK_PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {TASK_PRIORITY_LABEL[p]}
-              </option>
-            ))}
-          </select>
+            placeholder="Detalles, links, contexto…"
+            rows={3}
+          />
         </div>
-      </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="task-due">Vence</Label>
-        <Input
-          id="task-due"
-          type="date"
-          value={state.due_date ?? ""}
-          onChange={(e) =>
-            setState((prev) => ({ ...prev, due_date: e.target.value }))
-          }
-        />
-      </div>
-
-      {fieldErrors.form ? (
-        <p className="text-destructive text-sm" role="alert">
-          {fieldErrors.form}
-        </p>
-      ) : null}
-
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-        {isEdit ? (
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={() => deleteMutation.mutate()}
+        <div className="space-y-1.5">
+          <Label>Asignados</Label>
+          <AssigneePicker
+            value={state.assignee_keys}
+            onChange={(keys) =>
+              setState((prev) => ({ ...prev, assignee_keys: keys }))
+            }
             disabled={submitting}
-          >
-            Eliminar
-          </Button>
-        ) : (
-          <span aria-hidden />
-        )}
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          {onCancel ? (
+          />
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="task-status">Estado</Label>
+            <select
+              id="task-status"
+              value={state.status}
+              onChange={(e) =>
+                setState((prev) => ({
+                  ...prev,
+                  status: e.target.value as TaskStatus,
+                }))
+              }
+              className={selectClasses}
+            >
+              {TASK_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {TASK_STATUS_LABEL[s]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="task-priority">Prioridad</Label>
+            <select
+              id="task-priority"
+              value={state.priority}
+              onChange={(e) =>
+                setState((prev) => ({
+                  ...prev,
+                  priority: e.target.value as TaskPriority,
+                }))
+              }
+              className={selectClasses}
+            >
+              {TASK_PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {TASK_PRIORITY_LABEL[p]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="task-due">Vence</Label>
+          <Input
+            id="task-due"
+            type="date"
+            value={state.due_date ?? ""}
+            onChange={(e) =>
+              setState((prev) => ({ ...prev, due_date: e.target.value }))
+            }
+          />
+        </div>
+
+        {fieldErrors.form ? (
+          <p className="text-destructive text-sm" role="alert">
+            {fieldErrors.form}
+          </p>
+        ) : null}
+
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          {isEdit ? (
             <Button
               type="button"
-              variant="ghost"
-              onClick={onCancel}
+              variant="destructive"
+              onClick={() => deleteMutation.mutate()}
               disabled={submitting}
             >
-              Cancelar
+              Eliminar
             </Button>
-          ) : null}
-          <Button type="submit" disabled={submitting}>
-            {submitting
-              ? "Guardando…"
-              : isEdit
-                ? "Guardar cambios"
-                : "Crear tarea"}
-          </Button>
+          ) : (
+            <span aria-hidden />
+          )}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            {onCancel ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={onCancel}
+                disabled={submitting}
+              >
+                Cancelar
+              </Button>
+            ) : null}
+            <Button type="submit" disabled={submitting}>
+              {submitting
+                ? "Guardando…"
+                : isEdit
+                  ? "Guardar cambios"
+                  : "Crear tarea"}
+            </Button>
+          </div>
         </div>
-      </div>
-    </form>
+      </form>
+
+      {task ? (
+        <TaskComments
+          taskId={task.id}
+          currentUserId={currentUser.data?.id ?? null}
+        />
+      ) : null}
+    </div>
   );
 }

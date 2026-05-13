@@ -7,6 +7,7 @@ import { es } from "date-fns/locale";
 import { Check } from "lucide-react";
 
 import { toggleTaskDoneAction } from "@/app/actions/tasks";
+import { AssigneeChips } from "@/components/tasks/assignee-picker";
 import { TASKS_INVALIDATION_KEY } from "@/components/tasks/use-tasks";
 import {
   TASK_PRIORITY_LABEL,
@@ -61,6 +62,7 @@ export function TaskRow({ task, onSelect }: TaskRowProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: TASKS_INVALIDATION_KEY });
+      queryClient.invalidateQueries({ queryKey: ["activity"] });
     },
   });
 
@@ -129,6 +131,9 @@ export function TaskRow({ task, onSelect }: TaskRowProps) {
             >
               {due.label}
             </span>
+          ) : null}
+          {task.assignees.length > 0 ? (
+            <AssigneeChips keys={task.assignees} />
           ) : null}
         </div>
       </button>
