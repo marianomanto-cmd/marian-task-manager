@@ -39,6 +39,8 @@ export async function listInitialMessageIds(maxResults = 50): Promise<string[]> 
 
 export type HistoryDelta = {
   messageIds: string[];
+  /** Map<gmail_message_id, is_read> for messages whose UNREAD label changed. */
+  readChanges: Map<string, boolean>;
   latestHistoryId: string | null;
 };
 
@@ -50,18 +52,36 @@ export async function listMessageIdsFromHistory(
     const { data } = await gmail.users.history.list({
       userId: ME,
       startHistoryId,
-      historyTypes: ["messageAdded"],
+      historyTypes: ["messageAdded", "labelAdded", "labelRemoved"],
     });
 
     const ids = new Set<string>();
+    const readChanges = new Map<string, boolean>();
     for (const entry of data.history ?? []) {
       for (const added of entry.messagesAdded ?? []) {
         const id = added.message?.id;
         if (id) ids.add(id);
       }
+      // UNREAD added → message went back to unread in Gmail.
+      for (const ev of entry.labelsAdded ?? []) {
+        const msgId = ev.message?.id;
+        if (!msgId) continue;
+        if ((ev.labelIds ?? []).includes("UNREAD")) {
+          readChanges.set(msgId, false);
+        }
+      }
+      // UNREAD removed → message was read in Gmail.
+      for (const ev of entry.labelsRemoved ?? []) {
+        const msgId = ev.message?.id;
+        if (!msgId) continue;
+        if ((ev.labelIds ?? []).includes("UNREAD")) {
+          readChanges.set(msgId, true);
+        }
+      }
     }
     return {
       messageIds: Array.from(ids),
+      readChanges,
       latestHistoryId: data.historyId ?? null,
     };
   } catch (err) {
@@ -75,6 +95,61 @@ export async function listMessageIdsFromHistory(
     }
     throw err;
   }
+}
+
+/**
+ * Toggles the UNREAD label on a Gmail message so the app's "marcar leído"
+ * affordance reflects in the user's actual mailbox.
+ */
+export async function setMessageReadOnGmail(
+  gmailMessageId: string,
+  read: boolean,
+): Promise<void> {
+  const gmail = await getGmailClient();
+  await gmail.users.messages.modify({
+    userId: ME,
+    id: gmailMessageId,
+    requestBody: {
+      addLabelIds: read ? [] : ["UNREAD"],
+      removeLabelIds: read ? ["UNREAD"] : [],
+    },
+  });
+}
+
+/**
+ * Re-fetches the current label set for a list of gmail message ids and
+ * returns the read state for each. Used by the one-shot backfill that
+ * brings pre-migration-0012 rows up to date with Gmail.
+ */
+export async function fetchReadStates(
+  gmailMessageIds: string[],
+): Promise<Map<string, boolean>> {
+  const gmail = await getGmailClient();
+  const out = new Map<string, boolean>();
+  const BATCH = 10;
+  for (let i = 0; i < gmailMessageIds.length; i += BATCH) {
+    const chunk = gmailMessageIds.slice(i, i + BATCH);
+    const results = await Promise.all(
+      chunk.map(async (id) => {
+        try {
+          const { data } = await gmail.users.messages.get({
+            userId: ME,
+            id,
+            format: "metadata",
+            metadataHeaders: [],
+          });
+          return { id, labelIds: data.labelIds ?? [] };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    for (const r of results) {
+      if (!r) continue;
+      out.set(r.id, !r.labelIds.includes("UNREAD"));
+    }
+  }
+  return out;
 }
 
 export async function getCurrentHistoryId(): Promise<string | null> {

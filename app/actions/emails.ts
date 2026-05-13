@@ -3,6 +3,8 @@
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/result";
+import { GoogleAuthRequiredError } from "@/lib/google/auth";
+import { fetchReadStates, setMessageReadOnGmail } from "@/lib/gmail/sync";
 import type { Email, EmailAi } from "@/lib/gmail/types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -25,6 +27,21 @@ const listSchema = z.object({
    * undefined → no filter.
    */
   readState: z.enum(["unread", "read"]).optional(),
+  /** Filter by AI category (multi-select; OR logic). */
+  categories: z
+    .array(
+      z.enum([
+        "URGENTE",
+        "CLIENTE",
+        "PROVEEDOR",
+        "INTERNO",
+        "INFORMATIVO",
+        "OTROS",
+      ]),
+    )
+    .optional(),
+  /** Substring (case-insensitive) match against email_ai.campaign_code. */
+  campaignCode: z.string().trim().max(200).optional(),
   limit: z.number().int().min(1).max(200).optional(),
 });
 
@@ -95,9 +112,21 @@ export async function listEmailsAction(
 
   try {
     const supabase = await createClient();
+    const cats = parsed.data.categories;
+    const campaign = parsed.data.campaignCode?.trim();
+    const needsAiInnerJoin =
+      (cats && cats.length > 0) || (campaign && campaign.length > 0);
+
+    // When filtering by AI fields we have to switch the embedded resource to
+    // an inner join, otherwise PostgREST returns the row with ai:null instead
+    // of filtering it out.
+    const selectColumns = needsAiInnerJoin
+      ? SELECT_COLUMNS.replace("ai:email_ai(", "ai:email_ai!inner(")
+      : SELECT_COLUMNS;
+
     let query = supabase
       .from("emails")
-      .select(SELECT_COLUMNS)
+      .select(selectColumns)
       .eq("user_id", auth.userId)
       .order("received_at", { ascending: false })
       .limit(parsed.data.limit ?? 100);
@@ -109,6 +138,12 @@ export async function listEmailsAction(
       query = query.eq("is_read", false);
     } else if (parsed.data.readState === "read") {
       query = query.eq("is_read", true);
+    }
+    if (cats && cats.length > 0) {
+      query = query.in("email_ai.category", cats);
+    }
+    if (campaign && campaign.length > 0) {
+      query = query.ilike("email_ai.campaign_code", `%${campaign}%`);
     }
 
     const { data, error } = await query;
@@ -130,6 +165,32 @@ export async function markEmailReadAction(
 
   try {
     const supabase = await createClient();
+
+    // Read the gmail_message_id so we can mirror the change to Gmail's
+    // UNREAD label. RLS scopes by user_id; the .eq is belt-and-suspenders.
+    const { data: row, error: readErr } = await supabase
+      .from("emails")
+      .select("gmail_message_id")
+      .eq("id", parsed.data.id)
+      .eq("user_id", auth.userId)
+      .single();
+    if (readErr || !row) {
+      throw new Error(readErr?.message ?? "Mail no encontrado.");
+    }
+
+    // Best-effort Gmail side modify — if it fails (no scope, network, etc.)
+    // we still update our local flag but surface the error so the user can
+    // re-login if it's a scope issue.
+    let gmailError: string | null = null;
+    try {
+      await setMessageReadOnGmail(row.gmail_message_id, parsed.data.read);
+    } catch (err) {
+      if (err instanceof GoogleAuthRequiredError) {
+        return { ok: false, code: "auth_required", message: err.message };
+      }
+      gmailError = err instanceof Error ? err.message : "Gmail modify failed";
+    }
+
     const { data, error } = await supabase
       .from("emails")
       .update({ is_read: parsed.data.read })
@@ -138,8 +199,82 @@ export async function markEmailReadAction(
       .select(SELECT_COLUMNS)
       .single();
     if (error) throw new Error(error.message);
+
+    if (gmailError) {
+      return {
+        ok: false,
+        code: "unknown",
+        message: `Gmail no se pudo actualizar (${gmailError}). El flag local se actualizó igual.`,
+      };
+    }
     return { ok: true, data: normalizeEmailRow(data) };
   } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+/**
+ * One-shot: re-fetch the current UNREAD label for every email in our DB
+ * and update is_read accordingly. Useful right after migration 0012 to
+ * bring pre-migration rows in line with Gmail. Capped at 500 rows per call
+ * so a huge mailbox can be paginated by re-running.
+ */
+export async function backfillReadStateAction(): Promise<
+  ActionResult<{ checked: number; updated: number }>
+> {
+  const auth = await requireUserId();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { data: rows, error } = await supabase
+      .from("emails")
+      .select("id, gmail_message_id, is_read")
+      .eq("user_id", auth.userId)
+      .order("received_at", { ascending: false })
+      .limit(500);
+    if (error) throw new Error(error.message);
+    if (!rows || rows.length === 0) {
+      return { ok: true, data: { checked: 0, updated: 0 } };
+    }
+
+    const gmailIds = rows.map((r) => r.gmail_message_id as string);
+    const states = await fetchReadStates(gmailIds);
+
+    let updated = 0;
+    // Group ids by next state, then issue at most two UPDATEs.
+    const toRead: string[] = [];
+    const toUnread: string[] = [];
+    for (const row of rows) {
+      const want = states.get(row.gmail_message_id as string);
+      if (typeof want !== "boolean") continue;
+      if (want !== row.is_read) {
+        if (want) toRead.push(row.id as string);
+        else toUnread.push(row.id as string);
+      }
+    }
+    if (toRead.length > 0) {
+      await supabase
+        .from("emails")
+        .update({ is_read: true })
+        .eq("user_id", auth.userId)
+        .in("id", toRead);
+      updated += toRead.length;
+    }
+    if (toUnread.length > 0) {
+      await supabase
+        .from("emails")
+        .update({ is_read: false })
+        .eq("user_id", auth.userId)
+        .in("id", toUnread);
+      updated += toUnread.length;
+    }
+
+    return { ok: true, data: { checked: rows.length, updated } };
+  } catch (err) {
+    if (err instanceof GoogleAuthRequiredError) {
+      return { ok: false, code: "auth_required", message: err.message };
+    }
     return asUnknown(err);
   }
 }

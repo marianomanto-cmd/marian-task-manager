@@ -86,6 +86,7 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
   try {
     let messageIds: string[] = [];
     let nextHistoryId: string | null = null;
+    let readChanges: Map<string, boolean> = new Map();
 
     if (!settings?.gmail_history_id) {
       messageIds = await listInitialMessageIds(INITIAL_PULL_SIZE);
@@ -97,6 +98,32 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
       } else {
         messageIds = delta.messageIds;
         nextHistoryId = delta.latestHistoryId;
+        readChanges = delta.readChanges;
+      }
+    }
+
+    // Apply UNREAD label changes that Gmail observed since last sync, so
+    // reading a mail in Gmail flips the flag here too.
+    if (readChanges.size > 0) {
+      const readIds: string[] = [];
+      const unreadIds: string[] = [];
+      for (const [gid, isRead] of readChanges) {
+        if (isRead) readIds.push(gid);
+        else unreadIds.push(gid);
+      }
+      if (readIds.length > 0) {
+        await supabase
+          .from("emails")
+          .update({ is_read: true })
+          .eq("user_id", user.id)
+          .in("gmail_message_id", readIds);
+      }
+      if (unreadIds.length > 0) {
+        await supabase
+          .from("emails")
+          .update({ is_read: false })
+          .eq("user_id", user.id)
+          .in("gmail_message_id", unreadIds);
       }
     }
 

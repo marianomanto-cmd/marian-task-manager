@@ -17,9 +17,14 @@ export type EmailsQueryResult =
   | { emails: []; authRequired: false; error: string };
 
 export function emailsQueryKey(filter: ListEmailsInput) {
+  const cats = filter.categories ? [...filter.categories].sort().join(",") : "";
+  const campaign = filter.campaignCode?.trim() ?? "";
   return [
     "emails",
     filter.archived === undefined ? "all" : filter.archived ? "archived" : "active",
+    filter.readState ?? "any",
+    cats,
+    campaign,
     filter.limit ?? 100,
   ] as const;
 }

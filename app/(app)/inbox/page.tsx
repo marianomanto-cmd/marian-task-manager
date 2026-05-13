@@ -13,7 +13,10 @@ import { es } from "date-fns/locale";
 import { Inbox, RefreshCw } from "lucide-react";
 
 import { AnalyzeButton } from "@/components/inbox/analyze-button";
+import { BackfillReadButton } from "@/components/inbox/backfill-read-button";
 import { EmailCard } from "@/components/inbox/email-card";
+import { FilterPopover } from "@/components/inbox/filter-popover";
+import { SavedFilterChips } from "@/components/inbox/saved-filter-chips";
 import { SyncButton } from "@/components/inbox/sync-button";
 import {
   EMAILS_INVALIDATION_KEY,
@@ -26,6 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Email } from "@/lib/gmail/types";
+import type { InboxFilter } from "@/lib/inbox/filter";
 import { cn } from "@/lib/utils";
 
 type ReadFilter = "all" | "unread" | "read";
@@ -61,21 +65,20 @@ function groupByDay(emails: Email[]): DayGroup[] {
 
 export default function InboxPage() {
   const queryClient = useQueryClient();
-  const [showArchived, setShowArchived] = React.useState(false);
-  const [readFilter, setReadFilter] = React.useState<ReadFilter>("all");
+  const [filter, setFilter] = React.useState<InboxFilter>({ archived: false });
 
-  const filter = React.useMemo(() => {
-    const readState =
-      readFilter === "unread"
-        ? ("unread" as const)
-        : readFilter === "read"
-          ? ("read" as const)
-          : undefined;
-    return {
-      archived: showArchived,
-      readState,
-    };
-  }, [showArchived, readFilter]);
+  const readFilter: ReadFilter = filter.readState ?? "all";
+
+  function setReadFilter(value: ReadFilter) {
+    setFilter((prev) => ({
+      ...prev,
+      readState: value === "all" ? undefined : value,
+    }));
+  }
+
+  function toggleArchived() {
+    setFilter((prev) => ({ ...prev, archived: !prev.archived }));
+  }
 
   const emailsQuery = useEmails(filter);
   const lastSyncQuery = useLastSync();
@@ -126,13 +129,14 @@ export default function InboxPage() {
               <TabsTrigger value="read">Leídos</TabsTrigger>
             </TabsList>
           </Tabs>
+          <FilterPopover filter={filter} onChange={setFilter} />
           <Button
             type="button"
-            variant={showArchived ? "default" : "outline"}
+            variant={filter.archived ? "default" : "outline"}
             size="sm"
-            onClick={() => setShowArchived((v) => !v)}
+            onClick={toggleArchived}
           >
-            {showArchived ? "Mostrando archivados" : "Ver archivados"}
+            {filter.archived ? "Mostrando archivados" : "Ver archivados"}
           </Button>
           <Button
             type="button"
@@ -150,10 +154,13 @@ export default function InboxPage() {
               className={cn(emailsQuery.isFetching && "animate-spin")}
             />
           </Button>
+          <BackfillReadButton />
           <AnalyzeButton pendingCount={pendingAiQuery.data ?? undefined} />
           <SyncButton />
         </div>
       </header>
+
+      <SavedFilterChips current={filter} onApply={setFilter} />
 
       {emailsQuery.data?.authRequired ? (
         <div className="bg-amber-500/10 text-amber-800 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/30 px-3 py-2 text-sm">
@@ -183,10 +190,10 @@ export default function InboxPage() {
           <Inbox className="text-muted-foreground size-8" />
           <div className="space-y-1">
             <p className="text-sm font-medium">
-              {showArchived ? "No hay mails archivados" : "Sin mails todavía"}
+              {filter.archived ? "No hay mails archivados" : "Sin mails todavía"}
             </p>
             <p className="text-muted-foreground text-xs">
-              {showArchived
+              {filter.archived
                 ? "Volvé a la bandeja principal para archivar."
                 : "Tocá Sincronizar para traer los últimos 50."}
             </p>
