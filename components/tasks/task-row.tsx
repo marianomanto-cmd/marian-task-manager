@@ -18,10 +18,17 @@ import {
 import { cn } from "@/lib/utils";
 
 const PRIORITY_CLASSES: Record<TaskPriority, string> = {
-  low: "border-muted-foreground/40 text-muted-foreground",
-  medium: "border-sky-500/50 text-sky-700 dark:text-sky-300",
-  high: "border-rose-500/60 text-rose-700 dark:text-rose-300",
+  low: "bg-muted text-muted-foreground",
+  medium: "bg-sky-500/15 text-sky-700 dark:text-sky-200",
+  high: "bg-rose-500/15 text-rose-700 dark:text-rose-200",
 };
+
+const STATUS_CLASSES = {
+  todo: "bg-muted text-muted-foreground",
+  in_progress: "bg-sky-500/15 text-sky-700 dark:text-sky-200",
+  review: "bg-amber-500/15 text-amber-700 dark:text-amber-200",
+  done: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-200",
+} as const;
 
 function todayString(): string {
   return format(new Date(), "yyyy-MM-dd");
@@ -40,9 +47,9 @@ function dueDateLabel(dueDate: string): { label: string; tone: "overdue" | "toda
 }
 
 const TONE_CLASSES = {
-  overdue: "border-destructive/50 text-destructive bg-destructive/5",
-  today: "border-amber-500/60 text-amber-700 dark:text-amber-300 bg-amber-500/10",
-  upcoming: "border-muted-foreground/30 text-muted-foreground",
+  overdue: "bg-destructive/15 text-destructive",
+  today: "bg-amber-500/15 text-amber-700 dark:text-amber-200",
+  upcoming: "bg-muted text-muted-foreground",
 } as const;
 
 export type TaskRowProps = {
@@ -107,15 +114,20 @@ export function TaskRow({ task, onSelect }: TaskRowProps) {
           </p>
         ) : null}
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          {task.status !== "todo" && task.status !== "done" ? (
-            <span className="border-muted-foreground/30 text-muted-foreground inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider">
+          {task.status !== "todo" ? (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+                STATUS_CLASSES[task.status],
+              )}
+            >
               {TASK_STATUS_LABEL[task.status]}
             </span>
           ) : null}
           {task.priority !== "medium" ? (
             <span
               className={cn(
-                "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+                "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
                 PRIORITY_CLASSES[task.priority],
               )}
             >
@@ -125,7 +137,7 @@ export function TaskRow({ task, onSelect }: TaskRowProps) {
           {due ? (
             <span
               className={cn(
-                "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
+                "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium",
                 TONE_CLASSES[due.tone],
               )}
             >

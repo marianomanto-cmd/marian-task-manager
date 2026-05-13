@@ -137,7 +137,7 @@ export default function CalendarPage() {
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
+    <section className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
           {getTitle(view, anchor)}
