@@ -5,6 +5,34 @@ export type EmailAttachment = {
   size: number;
 };
 
+export type EmailAiCategory =
+  | "URGENTE"
+  | "CLIENTE"
+  | "PROVEEDOR"
+  | "INTERNO"
+  | "INFORMATIVO"
+  | "OTROS";
+
+export type EmailAiSuggestedAction =
+  | "responder"
+  | "crear_tarea"
+  | "archivar"
+  | "derivar";
+
+export type EmailAi = {
+  email_id: string;
+  category: EmailAiCategory | null;
+  summary: string | null;
+  priority: number | null;
+  campaign_code: string | null;
+  detected_deadline: string | null;
+  suggested_action: EmailAiSuggestedAction | null;
+  requires_response: boolean | null;
+  model_version: string;
+  prompt_version: string;
+  processed_at: string;
+};
+
 export type Email = {
   id: string;
   user_id: string;
@@ -21,6 +49,7 @@ export type Email = {
   attachments_meta: EmailAttachment[] | null;
   is_archived: boolean;
   created_at: string;
+  ai: EmailAi | null;
 };
 
 export type SyncLogRow = {

@@ -79,6 +79,14 @@ export default function InboxPage() {
         lastSync.messagesInserted > 0
           ? ` · ${lastSync.messagesInserted} nuevo${lastSync.messagesInserted === 1 ? "" : "s"}`
           : ""
+      }${
+        lastSync.messagesProcessedAi > 0
+          ? ` · ${lastSync.messagesProcessedAi} procesado${lastSync.messagesProcessedAi === 1 ? "" : "s"} por IA`
+          : ""
+      }${
+        lastSync.estimatedCostUsd > 0
+          ? ` · ~$${lastSync.estimatedCostUsd.toFixed(4)} USD`
+          : ""
       }`
     : "Todavía no sincronizaste";
 
