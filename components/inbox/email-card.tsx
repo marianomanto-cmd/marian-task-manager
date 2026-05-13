@@ -7,12 +7,14 @@ import { es } from "date-fns/locale";
 import {
   Archive,
   ArchiveRestore,
+  Check,
   ExternalLink,
   ListPlus,
+  Mail,
   Paperclip,
 } from "lucide-react";
 
-import { archiveEmailAction } from "@/app/actions/emails";
+import { archiveEmailAction, markEmailReadAction } from "@/app/actions/emails";
 import { convertEmailToTaskAction } from "@/app/actions/tasks";
 import { EMAILS_INVALIDATION_KEY } from "@/components/inbox/use-emails";
 import { TASKS_INVALIDATION_KEY } from "@/components/tasks/use-tasks";
@@ -81,6 +83,17 @@ export function EmailCard({ email }: { email: Email }) {
     },
   });
 
+  const readMutation = useMutation({
+    mutationFn: async (read: boolean) => {
+      const result = await markEmailReadAction({ id: email.id, read });
+      if (!result.ok) throw new Error(result.message);
+      return result.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: EMAILS_INVALIDATION_KEY });
+    },
+  });
+
   const convertMutation = useMutation({
     mutationFn: async () => {
       const result = await convertEmailToTaskAction(email.id);
@@ -113,16 +126,34 @@ export function EmailCard({ email }: { email: Email }) {
     ? deadlineLabel(ai.detected_deadline)
     : null;
 
+  const isUnread = !email.is_read;
+
   return (
     <li
       className={cn(
-        "flex items-start gap-3 px-3 py-3",
+        "relative flex items-start gap-3 px-3 py-3 transition-colors",
+        // Read mails get the subtle tint — unread stays clean so the
+        // untouched ones stand out at a glance.
+        !isUnread && "bg-sky-500/5",
         email.is_archived && "opacity-60",
       )}
     >
+      {/* Strip on the left edge marks unread (in addition to clean bg). */}
+      {isUnread ? (
+        <span
+          aria-hidden
+          className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-sky-500"
+        />
+      ) : null}
+
       <span
         aria-hidden
-        className="bg-muted text-muted-foreground mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold uppercase"
+        className={cn(
+          "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold uppercase",
+          isUnread
+            ? "bg-sky-500/15 text-sky-700 dark:text-sky-200"
+            : "bg-muted text-muted-foreground",
+        )}
       >
         {initialsFor(email)}
       </span>
@@ -131,10 +162,18 @@ export function EmailCard({ email }: { email: Email }) {
         href={gmailThreadUrl(email.gmail_thread_id)}
         target="_blank"
         rel="noopener noreferrer"
+        onClick={() => {
+          if (isUnread) readMutation.mutate(true);
+        }}
         className="min-w-0 flex-1 space-y-0.5"
       >
         <div className="flex items-baseline justify-between gap-2">
-          <span className="truncate text-sm font-medium">
+          <span
+            className={cn(
+              "truncate text-sm",
+              isUnread ? "font-semibold" : "text-muted-foreground font-medium",
+            )}
+          >
             {senderDisplay(email)}
           </span>
           <span className="text-muted-foreground shrink-0 text-[11px] font-mono tabular-nums">
@@ -142,7 +181,14 @@ export function EmailCard({ email }: { email: Email }) {
           </span>
         </div>
         {email.subject ? (
-          <p className="line-clamp-1 text-sm leading-snug">{email.subject}</p>
+          <p
+            className={cn(
+              "line-clamp-1 text-sm leading-snug",
+              isUnread ? "font-semibold" : "text-muted-foreground",
+            )}
+          >
+            {email.subject}
+          </p>
         ) : (
           <p className="text-muted-foreground line-clamp-1 text-sm italic">
             (sin asunto)
@@ -197,6 +243,21 @@ export function EmailCard({ email }: { email: Email }) {
       </a>
 
       <div className="flex shrink-0 flex-col gap-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={(e) => {
+            e.stopPropagation();
+            readMutation.mutate(isUnread);
+          }}
+          disabled={readMutation.isPending}
+          aria-label={isUnread ? "Marcar como leído" : "Marcar como no leído"}
+          className="size-8"
+          title={isUnread ? "Marcar como leído" : "Marcar como no leído"}
+        >
+          {isUnread ? <Check className="size-4" /> : <Mail className="size-4" />}
+        </Button>
         <Button
           type="button"
           variant="ghost"

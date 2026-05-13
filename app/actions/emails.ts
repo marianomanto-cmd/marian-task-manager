@@ -12,18 +12,30 @@ const AI_COLUMNS =
 const SELECT_COLUMNS = `
   id, user_id, gmail_message_id, gmail_thread_id, project_id,
   sender_name, sender_email, subject, snippet, body_preview,
-  received_at, has_attachments, attachments_meta, is_archived, created_at,
+  received_at, has_attachments, attachments_meta, is_archived, is_read,
+  created_at,
   ai:email_ai(${AI_COLUMNS})
 `;
 
 const listSchema = z.object({
   archived: z.boolean().optional(),
+  /**
+   * 'unread' → only is_read = false rows.
+   * 'read'   → only is_read = true rows.
+   * undefined → no filter.
+   */
+  readState: z.enum(["unread", "read"]).optional(),
   limit: z.number().int().min(1).max(200).optional(),
 });
 
 const archiveSchema = z.object({
   id: z.string().uuid(),
   archived: z.boolean(),
+});
+
+const readSchema = z.object({
+  id: z.string().uuid(),
+  read: z.boolean(),
 });
 
 export type ListEmailsInput = z.infer<typeof listSchema>;
@@ -60,11 +72,6 @@ function asUnknown(err: unknown): ActionResult<never> {
   };
 }
 
-/**
- * Supabase returns embedded one-to-one relationships either as a single
- * object or as an array depending on the FK direction. Normalize to a
- * plain `ai: EmailAi | null` so the UI doesn't have to switch on shape.
- */
 function normalizeEmailRow(raw: unknown): Email {
   const r = raw as Record<string, unknown>;
   const aiField = r.ai;
@@ -98,10 +105,40 @@ export async function listEmailsAction(
     if (parsed.data.archived !== undefined) {
       query = query.eq("is_archived", parsed.data.archived);
     }
+    if (parsed.data.readState === "unread") {
+      query = query.eq("is_read", false);
+    } else if (parsed.data.readState === "read") {
+      query = query.eq("is_read", true);
+    }
 
     const { data, error } = await query;
     if (error) throw new Error(error.message);
     return { ok: true, data: (data ?? []).map(normalizeEmailRow) };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function markEmailReadAction(
+  input: unknown,
+): Promise<ActionResult<Email>> {
+  const parsed = readSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
+  const auth = await requireUserId();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("emails")
+      .update({ is_read: parsed.data.read })
+      .eq("id", parsed.data.id)
+      .eq("user_id", auth.userId)
+      .select(SELECT_COLUMNS)
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, data: normalizeEmailRow(data) };
   } catch (err) {
     return asUnknown(err);
   }
@@ -142,7 +179,6 @@ export type LastSyncSummary = {
   error: string | null;
 };
 
-/** Latest sync_log row for the current user. Drives the inbox footer. */
 export async function getLastSyncAction(): Promise<
   ActionResult<LastSyncSummary | null>
 > {

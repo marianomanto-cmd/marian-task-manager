@@ -24,8 +24,11 @@ import {
   usePendingAiCount,
 } from "@/components/inbox/use-emails";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Email } from "@/lib/gmail/types";
 import { cn } from "@/lib/utils";
+
+type ReadFilter = "all" | "unread" | "read";
 
 type DayGroup = {
   key: string;
@@ -59,11 +62,20 @@ function groupByDay(emails: Email[]): DayGroup[] {
 export default function InboxPage() {
   const queryClient = useQueryClient();
   const [showArchived, setShowArchived] = React.useState(false);
+  const [readFilter, setReadFilter] = React.useState<ReadFilter>("all");
 
-  const filter = React.useMemo(
-    () => (showArchived ? { archived: true } : { archived: false }),
-    [showArchived],
-  );
+  const filter = React.useMemo(() => {
+    const readState =
+      readFilter === "unread"
+        ? ("unread" as const)
+        : readFilter === "read"
+          ? ("read" as const)
+          : undefined;
+    return {
+      archived: showArchived,
+      readState,
+    };
+  }, [showArchived, readFilter]);
 
   const emailsQuery = useEmails(filter);
   const lastSyncQuery = useLastSync();
@@ -95,7 +107,7 @@ export default function InboxPage() {
     : "Todavía no sincronizaste";
 
   return (
-    <section className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
+    <section className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
@@ -103,7 +115,17 @@ export default function InboxPage() {
           </h1>
           <p className="text-muted-foreground text-xs">{lastSyncLabel}</p>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Tabs
+            value={readFilter}
+            onValueChange={(v) => setReadFilter(v as ReadFilter)}
+          >
+            <TabsList>
+              <TabsTrigger value="all">Todos</TabsTrigger>
+              <TabsTrigger value="unread">Sin leer</TabsTrigger>
+              <TabsTrigger value="read">Leídos</TabsTrigger>
+            </TabsList>
+          </Tabs>
           <Button
             type="button"
             variant={showArchived ? "default" : "outline"}

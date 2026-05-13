@@ -43,7 +43,6 @@ type KanbanBoardProps = {
 export function KanbanBoard({ tasks, onSelectTask }: KanbanBoardProps) {
   const queryClient = useQueryClient();
   const [activeTaskId, setActiveTaskId] = React.useState<string | null>(null);
-  // Local optimistic state — moves tasks immediately while the mutation runs.
   const [overrides, setOverrides] = React.useState<Map<string, TaskStatus>>(
     () => new Map(),
   );
@@ -67,7 +66,6 @@ export function KanbanBoard({ tasks, onSelectTask }: KanbanBoardProps) {
         queryClient.invalidateQueries({ queryKey: TASKS_INVALIDATION_KEY }),
         queryClient.invalidateQueries({ queryKey: ["activity"] }),
       ]);
-      // Drop the optimistic override once the server is in sync.
       setOverrides((prev) => {
         if (!prev.has(vars.id)) return prev;
         const next = new Map(prev);
@@ -76,7 +74,6 @@ export function KanbanBoard({ tasks, onSelectTask }: KanbanBoardProps) {
       });
     },
     onError: (err: Error, vars) => {
-      // Roll back the optimistic update.
       setOverrides((prev) => {
         if (!prev.has(vars.id)) return prev;
         const next = new Map(prev);
@@ -157,6 +154,13 @@ export function KanbanBoard({ tasks, onSelectTask }: KanbanBoardProps) {
   );
 }
 
+const COLUMN_COUNT_BADGE: Record<TaskStatus, string> = {
+  todo: "bg-muted text-muted-foreground",
+  in_progress: "bg-sky-500/15 text-sky-700 dark:text-sky-200",
+  review: "bg-amber-500/15 text-amber-700 dark:text-amber-200",
+  done: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-200",
+};
+
 function KanbanColumn({
   status,
   accent,
@@ -175,20 +179,25 @@ function KanbanColumn({
     <div
       ref={setNodeRef}
       className={cn(
-        "bg-muted/30 flex min-h-[200px] flex-col gap-2 rounded-lg border border-t-4 p-2 transition-colors",
+        "bg-muted/30 flex min-h-[260px] flex-col gap-3 rounded-xl border border-t-4 p-3 transition-colors",
         accent,
-        isOver && "bg-muted/60",
+        isOver && "bg-muted/60 ring-ring/30 ring-2",
       )}
     >
-      <div className="flex items-baseline justify-between px-1">
+      <div className="flex items-center justify-between gap-2 px-0.5">
         <h3 className="text-xs font-semibold uppercase tracking-wider">
           {TASK_STATUS_LABEL[status]}
         </h3>
-        <span className="text-muted-foreground text-[11px] tabular-nums">
+        <span
+          className={cn(
+            "inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums",
+            COLUMN_COUNT_BADGE[status],
+          )}
+        >
           {tasks.length}
         </span>
       </div>
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-2">
         {tasks.map((task) => (
           <DraggableTaskCard
             key={task.id}
@@ -198,9 +207,9 @@ function KanbanColumn({
           />
         ))}
         {tasks.length === 0 ? (
-          <p className="text-muted-foreground px-1 py-3 text-center text-[11px]">
+          <div className="border-muted-foreground/20 text-muted-foreground rounded-lg border border-dashed px-2 py-6 text-center text-[11px]">
             Sin tareas
-          </p>
+          </div>
         ) : null}
       </div>
     </div>
@@ -222,7 +231,6 @@ function DraggableTaskCard({
       ref={setNodeRef}
       {...attributes}
       {...listeners}
-      // The DragOverlay renders the floating clone; hide the original while dragging.
       className={cn(isDragging && "invisible")}
     >
       <TaskCard task={task} onClick={() => onSelect(task)} />

@@ -4,7 +4,7 @@ import * as React from "react";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 
-import { AssigneeChips } from "@/components/tasks/assignee-picker";
+import { AssigneeAvatars } from "@/components/tasks/assignee-picker";
 import { TASK_PRIORITY_LABEL, type Task, type TaskPriority } from "@/lib/tasks/types";
 import { cn } from "@/lib/utils";
 
@@ -63,7 +63,8 @@ export function TaskCard({
     <div
       onClick={onClick}
       className={cn(
-        "bg-card hover:bg-accent/40 group flex cursor-pointer flex-col gap-1.5 rounded-lg border border-l-4 px-2.5 py-2 text-left shadow-xs transition-all",
+        "bg-card flex cursor-pointer flex-col gap-2 rounded-lg border border-l-4 p-3 shadow-sm transition-all",
+        "hover:-translate-y-0.5 hover:shadow-md",
         PRIORITY_CARD_BORDER[task.priority],
         dragging && "rotate-2 opacity-60 shadow-lg",
         isDone && "opacity-75",
@@ -82,30 +83,40 @@ export function TaskCard({
           {task.notes}
         </p>
       ) : null}
-      <div className="flex flex-wrap items-center gap-1 pt-0.5">
-        {task.priority !== "medium" ? (
-          <span
-            className={cn(
-              "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-              PRIORITY_BADGE[task.priority],
-            )}
-          >
-            {TASK_PRIORITY_LABEL[task.priority]}
-          </span>
-        ) : null}
-        {due ? (
-          <span
-            className={cn(
-              "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-              TONE_BADGE[due.tone],
-            )}
-          >
-            {due.label}
-          </span>
-        ) : null}
+
+      {(task.priority !== "medium" || due) && (
+        <div className="flex flex-wrap items-center gap-1">
+          {task.priority !== "medium" ? (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+                PRIORITY_BADGE[task.priority],
+              )}
+            >
+              {TASK_PRIORITY_LABEL[task.priority]}
+            </span>
+          ) : null}
+          {due ? (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                TONE_BADGE[due.tone],
+              )}
+            >
+              {due.label}
+            </span>
+          ) : null}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between gap-2 pt-0.5">
         {task.assignees.length > 0 ? (
-          <AssigneeChips keys={task.assignees} />
-        ) : null}
+          <AssigneeAvatars keys={task.assignees} size="sm" />
+        ) : (
+          <span className="text-muted-foreground text-[10px] italic">
+            Sin asignar
+          </span>
+        )}
       </div>
     </div>
   );

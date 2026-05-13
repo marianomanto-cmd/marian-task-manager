@@ -25,11 +25,6 @@ export type SyncResult = {
   durationMs: number;
 };
 
-/**
- * Gmail-only sync — does NOT call Claude. AI classification is a separate
- * explicit action (analyzePendingEmailsAction) so we never spend tokens
- * unless the user clicks the dedicated button.
- */
 export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
   const supabase = await createClient();
   const {
@@ -145,6 +140,7 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
             received_at: m.received_at,
             has_attachments: m.has_attachments,
             attachments_meta: m.attachments_meta,
+            is_read: m.is_read,
           })),
         )
         .select("id");
@@ -163,7 +159,6 @@ export async function syncGmailAction(): Promise<ActionResult<SyncResult>> {
       })
       .eq("user_id", user.id);
 
-    // Count pending AI to show "X mails sin analizar" in the UI hint.
     const { count: pendingAi } = await supabase
       .from("emails")
       .select("id", { count: "exact", head: true })
