@@ -19,7 +19,12 @@ const SELECT_COLUMNS = `
 
 const listSchema = z.object({
   archived: z.boolean().optional(),
-  onlyUnread: z.boolean().optional(),
+  /**
+   * 'unread' → only is_read = false rows.
+   * 'read'   → only is_read = true rows.
+   * undefined → no filter.
+   */
+  readState: z.enum(["unread", "read"]).optional(),
   limit: z.number().int().min(1).max(200).optional(),
 });
 
@@ -100,8 +105,10 @@ export async function listEmailsAction(
     if (parsed.data.archived !== undefined) {
       query = query.eq("is_archived", parsed.data.archived);
     }
-    if (parsed.data.onlyUnread) {
+    if (parsed.data.readState === "unread") {
       query = query.eq("is_read", false);
+    } else if (parsed.data.readState === "read") {
+      query = query.eq("is_read", true);
     }
 
     const { data, error } = await query;

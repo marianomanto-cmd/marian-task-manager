@@ -24,8 +24,11 @@ import {
   usePendingAiCount,
 } from "@/components/inbox/use-emails";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Email } from "@/lib/gmail/types";
 import { cn } from "@/lib/utils";
+
+type ReadFilter = "all" | "unread" | "read";
 
 type DayGroup = {
   key: string;
@@ -59,15 +62,20 @@ function groupByDay(emails: Email[]): DayGroup[] {
 export default function InboxPage() {
   const queryClient = useQueryClient();
   const [showArchived, setShowArchived] = React.useState(false);
-  const [onlyUnread, setOnlyUnread] = React.useState(false);
+  const [readFilter, setReadFilter] = React.useState<ReadFilter>("all");
 
-  const filter = React.useMemo(
-    () =>
-      showArchived
-        ? { archived: true, onlyUnread }
-        : { archived: false, onlyUnread },
-    [showArchived, onlyUnread],
-  );
+  const filter = React.useMemo(() => {
+    const readState =
+      readFilter === "unread"
+        ? ("unread" as const)
+        : readFilter === "read"
+          ? ("read" as const)
+          : undefined;
+    return {
+      archived: showArchived,
+      readState,
+    };
+  }, [showArchived, readFilter]);
 
   const emailsQuery = useEmails(filter);
   const lastSyncQuery = useLastSync();
@@ -108,14 +116,16 @@ export default function InboxPage() {
           <p className="text-muted-foreground text-xs">{lastSyncLabel}</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <Button
-            type="button"
-            variant={onlyUnread ? "default" : "outline"}
-            size="sm"
-            onClick={() => setOnlyUnread((v) => !v)}
+          <Tabs
+            value={readFilter}
+            onValueChange={(v) => setReadFilter(v as ReadFilter)}
           >
-            {onlyUnread ? "Solo sin leer" : "Sin leer"}
-          </Button>
+            <TabsList>
+              <TabsTrigger value="all">Todos</TabsTrigger>
+              <TabsTrigger value="unread">Sin leer</TabsTrigger>
+              <TabsTrigger value="read">Leídos</TabsTrigger>
+            </TabsList>
+          </Tabs>
           <Button
             type="button"
             variant={showArchived ? "default" : "outline"}

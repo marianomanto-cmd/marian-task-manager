@@ -132,10 +132,13 @@ export function EmailCard({ email }: { email: Email }) {
     <li
       className={cn(
         "relative flex items-start gap-3 px-3 py-3 transition-colors",
-        isUnread && "bg-sky-500/5",
+        // Read mails get the subtle tint — unread stays clean so the
+        // untouched ones stand out at a glance.
+        !isUnread && "bg-sky-500/5",
         email.is_archived && "opacity-60",
       )}
     >
+      {/* Strip on the left edge marks unread (in addition to clean bg). */}
       {isUnread ? (
         <span
           aria-hidden
