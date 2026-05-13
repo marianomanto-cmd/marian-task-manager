@@ -7,6 +7,7 @@ import { es } from "date-fns/locale";
 import { useActivity } from "@/components/activity/use-activity";
 import { TASK_STATUS_LABEL, type TaskStatus } from "@/lib/tasks/types";
 import { displayNameForEmail, getMemberByKey } from "@/lib/team/members";
+import { cn } from "@/lib/utils";
 import type { ActivityEntry, ActivityAction } from "@/app/actions/activity";
 
 function describe(entry: ActivityEntry): string {
@@ -101,7 +102,8 @@ export function ActivityFeed() {
       </p>
     );
   }
-  const entries = data ?? [];
+  const entries = data?.entries ?? [];
+  const lastSeenAt = data?.lastSeenAt ?? null;
   if (entries.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
@@ -109,6 +111,7 @@ export function ActivityFeed() {
       </p>
     );
   }
+  const lastSeenMs = lastSeenAt ? new Date(lastSeenAt).getTime() : 0;
 
   return (
     <ul className="divide-border divide-y">
@@ -116,12 +119,20 @@ export function ActivityFeed() {
         const actor = displayNameForEmail(entry.actor_email);
         const initials = initialsFor(actor);
         const text = describe(entry);
+        const createdMs = new Date(entry.created_at).getTime();
+        const isUnseen = createdMs > lastSeenMs;
         const relative = formatDistanceToNow(parseISO(entry.created_at), {
           addSuffix: true,
           locale: es,
         });
         return (
-          <li key={entry.id} className="flex items-start gap-3 px-3 py-3">
+          <li
+            key={entry.id}
+            className={cn(
+              "flex items-start gap-3 px-3 py-3",
+              isUnseen && "bg-sky-500/5",
+            )}
+          >
             <span
               aria-hidden
               className="bg-muted text-muted-foreground mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold uppercase"
@@ -129,9 +140,22 @@ export function ActivityFeed() {
               {initials}
             </span>
             <div className="min-w-0 flex-1 space-y-0.5">
-              <p className="text-sm leading-snug">{text}</p>
+              <p
+                className={cn(
+                  "text-sm leading-snug",
+                  isUnseen && "font-medium",
+                )}
+              >
+                {text}
+              </p>
               <p className="text-muted-foreground text-[10px]">{relative}</p>
             </div>
+            {isUnseen ? (
+              <span
+                aria-hidden
+                className="mt-1.5 size-1.5 shrink-0 rounded-full bg-sky-500"
+              />
+            ) : null}
           </li>
         );
       })}

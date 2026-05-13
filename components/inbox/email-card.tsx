@@ -8,6 +8,7 @@ import {
   Archive,
   ArchiveRestore,
   Check,
+  Download,
   ExternalLink,
   ListPlus,
   Mail,
@@ -69,6 +70,13 @@ function deadlineLabel(raw: string): string | null {
   }
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
 export function EmailCard({ email }: { email: Email }) {
   const queryClient = useQueryClient();
 
@@ -91,6 +99,9 @@ export function EmailCard({ email }: { email: Email }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: EMAILS_INVALIDATION_KEY });
+    },
+    onError: (err: Error) => {
+      showToast({ title: "No se pudo cambiar estado", description: err.message });
     },
   });
 
@@ -127,18 +138,18 @@ export function EmailCard({ email }: { email: Email }) {
     : null;
 
   const isUnread = !email.is_read;
+  const attachments = email.attachments_meta ?? [];
 
   return (
     <li
       className={cn(
-        "relative flex items-start gap-3 px-3 py-3 transition-colors",
-        // Read mails get the subtle tint — unread stays clean so the
-        // untouched ones stand out at a glance.
-        !isUnread && "bg-sky-500/5",
+        "relative px-3 py-3 transition-colors",
+        // Read mails (already opened in Gmail) get a visible sky tint so
+        // the untouched/unread ones stand out by their clean white bg.
+        !isUnread && "bg-sky-500/10 dark:bg-sky-500/15",
         email.is_archived && "opacity-60",
       )}
     >
-      {/* Strip on the left edge marks unread (in addition to clean bg). */}
       {isUnread ? (
         <span
           aria-hidden
@@ -146,152 +157,177 @@ export function EmailCard({ email }: { email: Email }) {
         />
       ) : null}
 
-      <span
-        aria-hidden
-        className={cn(
-          "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold uppercase",
-          isUnread
-            ? "bg-sky-500/15 text-sky-700 dark:text-sky-200"
-            : "bg-muted text-muted-foreground",
-        )}
-      >
-        {initialsFor(email)}
-      </span>
+      <div className="flex items-start gap-3">
+        <span
+          aria-hidden
+          className={cn(
+            "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold uppercase",
+            isUnread
+              ? "bg-sky-500/15 text-sky-700 dark:text-sky-200"
+              : "bg-muted text-muted-foreground",
+          )}
+        >
+          {initialsFor(email)}
+        </span>
 
-      <a
-        href={gmailThreadUrl(email.gmail_thread_id)}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={() => {
-          if (isUnread) readMutation.mutate(true);
-        }}
-        className="min-w-0 flex-1 space-y-0.5"
-      >
-        <div className="flex items-baseline justify-between gap-2">
-          <span
-            className={cn(
-              "truncate text-sm",
-              isUnread ? "font-semibold" : "text-muted-foreground font-medium",
-            )}
-          >
-            {senderDisplay(email)}
-          </span>
-          <span className="text-muted-foreground shrink-0 text-[11px] font-mono tabular-nums">
-            {timeLabel}
-          </span>
-        </div>
-        {email.subject ? (
-          <p
-            className={cn(
-              "line-clamp-1 text-sm leading-snug",
-              isUnread ? "font-semibold" : "text-muted-foreground",
-            )}
-          >
-            {email.subject}
-          </p>
-        ) : (
-          <p className="text-muted-foreground line-clamp-1 text-sm italic">
-            (sin asunto)
-          </p>
-        )}
-        {aiSummary ? (
-          <p className="text-muted-foreground line-clamp-2 text-xs leading-snug">
-            {aiSummary}
-          </p>
-        ) : email.snippet || email.body_preview ? (
-          <p className="text-muted-foreground line-clamp-1 text-xs">
-            {email.snippet ?? email.body_preview}
-          </p>
-        ) : null}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          {ai?.category ? (
+        <a
+          href={gmailThreadUrl(email.gmail_thread_id)}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => {
+            if (isUnread) readMutation.mutate(true);
+          }}
+          className="min-w-0 flex-1 space-y-0.5"
+        >
+          <div className="flex items-baseline justify-between gap-2">
             <span
               className={cn(
-                "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-                CATEGORY_STYLE[ai.category],
+                "truncate text-sm",
+                isUnread ? "font-semibold" : "text-muted-foreground font-medium",
               )}
             >
-              {ai.category.toLowerCase()}
+              {senderDisplay(email)}
             </span>
-          ) : null}
-          {ai?.campaign_code ? (
-            <span className="inline-flex items-center rounded-full border border-violet-500/50 text-violet-700 dark:text-violet-300 bg-violet-500/5 px-1.5 py-0.5 text-[10px] font-mono">
-              {ai.campaign_code}
+            <span className="text-muted-foreground shrink-0 text-[11px] font-mono tabular-nums">
+              {timeLabel}
             </span>
-          ) : null}
-          {typeof ai?.priority === "number" && ai.priority >= 70 ? (
-            <span className="border-amber-500/60 text-amber-700 dark:text-amber-300 bg-amber-500/10 inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider">
-              urgente {ai.priority}
-            </span>
-          ) : null}
-          {aiDeadline ? (
-            <span className="border-destructive/40 text-destructive bg-destructive/5 inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
-              vence {aiDeadline}
-            </span>
-          ) : null}
-          {email.has_attachments ? (
-            <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px]">
-              <Paperclip className="size-3" />
-              {email.attachments_meta?.length ?? 0}
-            </span>
-          ) : null}
-          <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px]">
-            <ExternalLink className="size-3" />
-            Abrir en Gmail
-          </span>
-        </div>
-      </a>
-
-      <div className="flex shrink-0 flex-col gap-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={(e) => {
-            e.stopPropagation();
-            readMutation.mutate(isUnread);
-          }}
-          disabled={readMutation.isPending}
-          aria-label={isUnread ? "Marcar como leído" : "Marcar como no leído"}
-          className="size-8"
-          title={isUnread ? "Marcar como leído" : "Marcar como no leído"}
-        >
-          {isUnread ? <Check className="size-4" /> : <Mail className="size-4" />}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={(e) => {
-            e.stopPropagation();
-            convertMutation.mutate();
-          }}
-          disabled={convertMutation.isPending}
-          aria-label="Crear tarea desde este mail"
-          className="size-8"
-          title="Crear tarea"
-        >
-          <ListPlus className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={(e) => {
-            e.stopPropagation();
-            archiveMutation.mutate(!email.is_archived);
-          }}
-          disabled={archiveMutation.isPending}
-          aria-label={email.is_archived ? "Restaurar" : "Archivar"}
-          className="size-8"
-        >
-          {email.is_archived ? (
-            <ArchiveRestore className="size-4" />
+          </div>
+          {email.subject ? (
+            <p
+              className={cn(
+                "line-clamp-1 text-sm leading-snug",
+                isUnread ? "font-semibold" : "text-muted-foreground",
+              )}
+            >
+              {email.subject}
+            </p>
           ) : (
-            <Archive className="size-4" />
+            <p className="text-muted-foreground line-clamp-1 text-sm italic">
+              (sin asunto)
+            </p>
           )}
-        </Button>
+          {aiSummary ? (
+            <p className="text-muted-foreground line-clamp-2 text-xs leading-snug">
+              {aiSummary}
+            </p>
+          ) : email.snippet || email.body_preview ? (
+            <p className="text-muted-foreground line-clamp-1 text-xs">
+              {email.snippet ?? email.body_preview}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            {ai?.category ? (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+                  CATEGORY_STYLE[ai.category],
+                )}
+              >
+                {ai.category.toLowerCase()}
+              </span>
+            ) : null}
+            {ai?.campaign_code ? (
+              <span className="inline-flex items-center rounded-full border border-violet-500/50 text-violet-700 dark:text-violet-300 bg-violet-500/5 px-1.5 py-0.5 text-[10px] font-mono">
+                {ai.campaign_code}
+              </span>
+            ) : null}
+            {typeof ai?.priority === "number" && ai.priority >= 70 ? (
+              <span className="border-amber-500/60 text-amber-700 dark:text-amber-300 bg-amber-500/10 inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider">
+                urgente {ai.priority}
+              </span>
+            ) : null}
+            {aiDeadline ? (
+              <span className="border-destructive/40 text-destructive bg-destructive/5 inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
+                vence {aiDeadline}
+              </span>
+            ) : null}
+            {attachments.length > 0 ? (
+              <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px]">
+                <Paperclip className="size-3" />
+                {attachments.length}
+              </span>
+            ) : null}
+            <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px]">
+              <ExternalLink className="size-3" />
+              Abrir en Gmail
+            </span>
+          </div>
+        </a>
+
+        <div className="flex shrink-0 flex-col gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              readMutation.mutate(isUnread);
+            }}
+            disabled={readMutation.isPending}
+            aria-label={isUnread ? "Marcar como leído" : "Marcar como no leído"}
+            className="size-8"
+            title={isUnread ? "Marcar como leído" : "Marcar como no leído"}
+          >
+            {isUnread ? <Check className="size-4" /> : <Mail className="size-4" />}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              convertMutation.mutate();
+            }}
+            disabled={convertMutation.isPending}
+            aria-label="Crear tarea desde este mail"
+            className="size-8"
+            title="Crear tarea"
+          >
+            <ListPlus className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              archiveMutation.mutate(!email.is_archived);
+            }}
+            disabled={archiveMutation.isPending}
+            aria-label={email.is_archived ? "Restaurar" : "Archivar"}
+            className="size-8"
+          >
+            {email.is_archived ? (
+              <ArchiveRestore className="size-4" />
+            ) : (
+              <Archive className="size-4" />
+            )}
+          </Button>
+        </div>
       </div>
+
+      {/* Attachments live on a separate row so the download <a>s can sit
+          outside the parent "Abrir en Gmail" link without nesting anchors. */}
+      {attachments.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1 pt-2 pl-11">
+          {attachments.map((a) => (
+            <a
+              key={a.id}
+              href={`/api/attachments/${email.id}/${encodeURIComponent(a.id)}?name=${encodeURIComponent(a.filename)}&mime=${encodeURIComponent(a.mime)}`}
+              download={a.filename}
+              onClick={(e) => e.stopPropagation()}
+              title={`${a.filename} · ${formatBytes(a.size)}`}
+              className="bg-card hover:bg-accent inline-flex max-w-[220px] items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium"
+            >
+              <Download className="text-muted-foreground size-3 shrink-0" />
+              <span className="truncate">{a.filename}</span>
+              <span className="text-muted-foreground shrink-0">
+                {formatBytes(a.size)}
+              </span>
+            </a>
+          ))}
+        </div>
+      ) : null}
     </li>
   );
 }

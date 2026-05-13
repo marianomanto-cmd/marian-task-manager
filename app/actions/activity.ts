@@ -32,8 +32,14 @@ const inputSchema = z.object({
 
 export type ListActivityInput = z.infer<typeof inputSchema>;
 
+export type ActivityListResult = {
+  entries: ActivityEntry[];
+  lastSeenAt: string | null;
+};
+
 async function requireUser(): Promise<
-  { ok: true } | { ok: false; result: ActionResult<never> }
+  | { ok: true; userId: string }
+  | { ok: false; result: ActionResult<never> }
 > {
   const supabase = await createClient();
   const {
@@ -49,7 +55,7 @@ async function requireUser(): Promise<
       },
     };
   }
-  return { ok: true };
+  return { ok: true, userId: user.id };
 }
 
 function asInvalid(message: string): ActionResult<never> {
@@ -66,7 +72,7 @@ function asUnknown(err: unknown): ActionResult<never> {
 
 export async function listActivityAction(
   input: ListActivityInput = {},
-): Promise<ActionResult<ActivityEntry[]>> {
+): Promise<ActionResult<ActivityListResult>> {
   const parsed = inputSchema.safeParse(input);
   if (!parsed.success) return asInvalid(parsed.error.message);
 
@@ -112,7 +118,41 @@ export async function listActivityAction(
       } satisfies ActivityEntry;
     });
 
-    return { ok: true, data: rows };
+    // Read this user's last_seen_activity_at so the UI can render a dot
+    // for unseen entries.
+    const { data: settingsRow } = await supabase
+      .from("user_settings")
+      .select("last_seen_activity_at")
+      .eq("user_id", auth.userId)
+      .maybeSingle();
+
+    return {
+      ok: true,
+      data: {
+        entries: rows,
+        lastSeenAt: (settingsRow?.last_seen_activity_at as string | null) ?? null,
+      },
+    };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function markActivitySeenAction(): Promise<ActionResult<{ at: string }>> {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from("user_settings")
+      .upsert(
+        { user_id: auth.userId, last_seen_activity_at: now },
+        { onConflict: "user_id" },
+      );
+    if (error) throw new Error(error.message);
+    return { ok: true, data: { at: now } };
   } catch (err) {
     return asUnknown(err);
   }
