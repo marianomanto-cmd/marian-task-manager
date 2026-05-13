@@ -3,16 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { NAV_ITEMS } from "@/components/shell/nav-items";
+import { visibleNavItems } from "@/components/shell/nav-items";
 import { cn } from "@/lib/utils";
 
-export function Sidebar() {
+export function Sidebar({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
+  const items = visibleNavItems(isAdmin);
 
   return (
     <aside className="bg-sidebar text-sidebar-foreground hidden w-56 shrink-0 border-r md:flex md:flex-col">
       <nav className="flex flex-col gap-1 p-3">
-        {NAV_ITEMS.map((item) => {
+        {items.map((item) => {
           const Icon = item.icon;
           const active =
             pathname === item.href || pathname.startsWith(`${item.href}/`);

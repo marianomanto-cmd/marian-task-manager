@@ -6,6 +6,7 @@ import { UserMenu } from "@/components/shell/user-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 type HeaderProps = {
+  isAdmin: boolean;
   user: {
     email: string | null;
     name: string | null;
@@ -13,11 +14,13 @@ type HeaderProps = {
   };
 };
 
-export function Header({ user }: HeaderProps) {
+export function Header({ isAdmin, user }: HeaderProps) {
+  const homeHref = isAdmin ? "/inbox" : "/tasks";
+
   return (
     <header className="bg-background/95 supports-[backdrop-filter]:bg-background/70 sticky top-0 z-40 border-b backdrop-blur">
       <div className="flex h-14 items-center gap-4 px-4 md:px-6">
-        <Link href="/inbox" className="flex items-center gap-2 font-semibold">
+        <Link href={homeHref} className="flex items-center gap-2 font-semibold">
           <span className="bg-primary text-primary-foreground inline-flex size-6 items-center justify-center rounded-md text-xs font-bold">
             AB
           </span>
@@ -37,7 +40,7 @@ export function Header({ user }: HeaderProps) {
       <div className="border-t md:hidden">
         <TimezoneClocks variant="compact" className="px-4 py-1.5" />
       </div>
-      <MeetingAlertBanner />
+      {isAdmin ? <MeetingAlertBanner /> : null}
     </header>
   );
 }

@@ -12,13 +12,16 @@ import {
 import { es } from "date-fns/locale";
 import { Inbox, RefreshCw } from "lucide-react";
 
+import { AnalyzeButton } from "@/components/inbox/analyze-button";
 import { EmailCard } from "@/components/inbox/email-card";
 import { SyncButton } from "@/components/inbox/sync-button";
 import {
   EMAILS_INVALIDATION_KEY,
+  PENDING_AI_INVALIDATION_KEY,
   SYNC_LOG_INVALIDATION_KEY,
   useEmails,
   useLastSync,
+  usePendingAiCount,
 } from "@/components/inbox/use-emails";
 import { Button } from "@/components/ui/button";
 import type { Email } from "@/lib/gmail/types";
@@ -64,6 +67,7 @@ export default function InboxPage() {
 
   const emailsQuery = useEmails(filter);
   const lastSyncQuery = useLastSync();
+  const pendingAiQuery = usePendingAiCount();
   const emails = React.useMemo(
     () => emailsQuery.data?.emails ?? [],
     [emailsQuery.data?.emails],
@@ -115,6 +119,7 @@ export default function InboxPage() {
             onClick={() => {
               queryClient.invalidateQueries({ queryKey: EMAILS_INVALIDATION_KEY });
               queryClient.invalidateQueries({ queryKey: SYNC_LOG_INVALIDATION_KEY });
+              queryClient.invalidateQueries({ queryKey: PENDING_AI_INVALIDATION_KEY });
             }}
             disabled={emailsQuery.isFetching}
             aria-label="Refrescar lista"
@@ -123,6 +128,7 @@ export default function InboxPage() {
               className={cn(emailsQuery.isFetching && "animate-spin")}
             />
           </Button>
+          <AnalyzeButton pendingCount={pendingAiQuery.data ?? undefined} />
           <SyncButton />
         </div>
       </header>

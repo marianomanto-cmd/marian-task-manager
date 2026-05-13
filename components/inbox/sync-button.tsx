@@ -8,6 +8,7 @@ import { syncGmailAction } from "@/app/actions/sync";
 import { showToast } from "@/components/ui/toast";
 import {
   EMAILS_INVALIDATION_KEY,
+  PENDING_AI_INVALIDATION_KEY,
   SYNC_LOG_INVALIDATION_KEY,
 } from "@/components/inbox/use-emails";
 import { Button } from "@/components/ui/button";
@@ -52,20 +53,26 @@ export function SyncButton({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: EMAILS_INVALIDATION_KEY }),
         queryClient.invalidateQueries({ queryKey: SYNC_LOG_INVALIDATION_KEY }),
+        queryClient.invalidateQueries({ queryKey: PENDING_AI_INVALIDATION_KEY }),
       ]);
+      const pendingNote =
+        data.pendingAi > 0
+          ? ` · ${data.pendingAi} sin analizar`
+          : "";
       if (data.inserted > 0) {
         showToast({
           title: `${data.inserted} mail${data.inserted === 1 ? "" : "s"} nuevo${data.inserted === 1 ? "" : "s"}`,
           description: data.resetHistory
-            ? "Cursor expirado, rehice un pull inicial."
-            : `Procesados ${data.fetched}, salteados ${data.skipped}.`,
+            ? `Cursor expirado, rehice un pull inicial.${pendingNote}`
+            : `Procesados ${data.fetched}, salteados ${data.skipped}.${pendingNote}`,
         });
       } else {
         showToast({
           title: "Bandeja al día",
-          description: data.fetched === 0
-            ? "No hubo cambios desde la última sync."
-            : `Salteados ${data.skipped} ya cacheados.`,
+          description:
+            (data.fetched === 0
+              ? "No hubo cambios desde la última sync."
+              : `Salteados ${data.skipped} ya cacheados.`) + pendingNote,
           duration: 3500,
         });
       }
