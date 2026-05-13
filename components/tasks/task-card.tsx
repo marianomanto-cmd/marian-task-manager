@@ -3,6 +3,7 @@
 import * as React from "react";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
+import { LinkIcon } from "lucide-react";
 
 import { AssigneeAvatars } from "@/components/tasks/assignee-picker";
 import { TASK_PRIORITY_LABEL, type Task, type TaskPriority } from "@/lib/tasks/types";
@@ -117,6 +118,19 @@ export function TaskCard({
             Sin asignar
           </span>
         )}
+        {task.link ? (
+          <a
+            href={task.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-muted-foreground hover:text-foreground"
+            aria-label="Abrir link"
+            title={task.link}
+          >
+            <LinkIcon className="size-3.5" />
+          </a>
+        ) : null}
       </div>
     </div>
   );

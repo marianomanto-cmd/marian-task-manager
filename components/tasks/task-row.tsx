@@ -4,7 +4,7 @@ import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
-import { Check } from "lucide-react";
+import { Check, LinkIcon } from "lucide-react";
 
 import { toggleTaskDoneAction } from "@/app/actions/tasks";
 import { AssigneeAvatars } from "@/components/tasks/assignee-picker";
@@ -149,6 +149,19 @@ export function TaskRow({ task, onSelect }: TaskRowProps) {
           ) : null}
         </div>
       </button>
+      {task.link ? (
+        <a
+          href={task.link}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 self-start opacity-0 transition-opacity group-hover:opacity-100"
+          aria-label="Abrir link"
+          title={task.link}
+        >
+          <LinkIcon className="size-3.5" />
+        </a>
+      ) : null}
     </li>
   );
 }

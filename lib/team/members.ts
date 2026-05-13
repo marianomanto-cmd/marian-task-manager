@@ -11,6 +11,12 @@ export type TeamMember = {
   name: string;
   email: string;
   colorIndex: number;
+  /**
+   * Slack member ID (e.g. "U07ABCDEF"). When set we render an @mention in
+   * Slack notifications, otherwise we fall back to the display name.
+   * Get it in Slack: profile → "More" → "Copy member ID".
+   */
+  slackUserId?: string;
 };
 
 const PALETTE: Array<{ chipBg: string; chipText: string; barBg: string; barText: string }> = [

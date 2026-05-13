@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/result";
+import { notifyTaskEvent } from "@/lib/slack/notify";
 import { createClient } from "@/lib/supabase/server";
 import {
   TASK_PRIORITIES,
@@ -14,7 +15,7 @@ import {
 
 const SELECT_COLUMNS = `
   id, user_id, project_id, email_id, title, notes, status, priority,
-  due_date, completed_at, created_at, updated_at,
+  due_date, completed_at, created_at, updated_at, link,
   assignees:task_assignees(member_key)
 `;
 
@@ -38,12 +39,15 @@ const listSchema = z.object({
   archiveMode: archiveModeSchema.optional(),
 });
 
+const linkSchema = z.string().trim().max(2000);
+
 const createSchema = z.object({
   title: z.string().trim().min(1, "Falta el título").max(500),
   notes: z.string().trim().max(8000).optional().nullable(),
   status: statusSchema.default("todo"),
   priority: prioritySchema.default("medium"),
   due_date: dateSchema.optional().nullable(),
+  link: linkSchema.optional().nullable(),
   assignee_keys: z.array(memberKeySchema).max(20).default([]),
 });
 
@@ -54,6 +58,7 @@ const updateSchema = z.object({
   status: statusSchema.optional(),
   priority: prioritySchema.optional(),
   due_date: dateSchema.optional().nullable(),
+  link: linkSchema.optional().nullable(),
   assignee_keys: z.array(memberKeySchema).max(20).optional(),
 });
 
@@ -160,11 +165,13 @@ async function fetchTaskById(
 async function setAssigneesAndLog(
   supabase: SupabaseServerClient,
   taskId: string,
+  taskTitle: string,
   nextKeys: string[],
   currentKeys: string[],
   actorUserId: string,
   actorEmail: string | null,
-): Promise<void> {
+  options: { notifyAssigned?: boolean } = {},
+): Promise<{ added: string[]; removed: string[] }> {
   const currentSet = new Set(currentKeys);
   const nextSet = new Set(nextKeys);
   const toAdd = [...nextSet].filter((k) => !currentSet.has(k));
@@ -187,6 +194,15 @@ async function setAssigneesAndLog(
         action: "assigned",
         payload: { member_key },
       });
+      if (options.notifyAssigned) {
+        await notifyTaskEvent({
+          kind: "assigned",
+          taskId,
+          title: taskTitle,
+          newAssigneeKey: member_key,
+          actorEmail,
+        });
+      }
     }
   }
 
@@ -207,6 +223,8 @@ async function setAssigneesAndLog(
       });
     }
   }
+
+  return { added: toAdd, removed: toRemove };
 }
 
 export async function listTasksAction(
@@ -271,6 +289,7 @@ export async function createTaskAction(
         status: parsed.data.status,
         priority: parsed.data.priority,
         due_date: parsed.data.due_date ?? null,
+        link: parsed.data.link?.length ? parsed.data.link : null,
         completed_at:
           parsed.data.status === "done" ? new Date().toISOString() : null,
       })
@@ -281,11 +300,14 @@ export async function createTaskAction(
 
     const taskId = insertRow.id as string;
 
-    // Persist initial assignees (if any) and log them.
+    // Persist initial assignees (if any) and log them. We skip the per-key
+    // "assigned" Slack DM on create — we send a single combined "created"
+    // notification below to avoid spamming.
     if (parsed.data.assignee_keys.length > 0) {
       await setAssigneesAndLog(
         supabase,
         taskId,
+        parsed.data.title,
         parsed.data.assignee_keys,
         [],
         auth.userId,
@@ -299,6 +321,14 @@ export async function createTaskAction(
       actorEmail: auth.email,
       action: "created",
       payload: { title: parsed.data.title },
+    });
+
+    await notifyTaskEvent({
+      kind: "created",
+      taskId,
+      title: parsed.data.title,
+      assigneeKeys: parsed.data.assignee_keys,
+      actorEmail: auth.email,
     });
 
     const refreshed = await fetchTaskById(supabase, taskId);
@@ -325,7 +355,7 @@ export async function updateTaskAction(
     const { data: current, error: fetchErr } = await supabase
       .from("tasks")
       .select(
-        "id, status, completed_at, title, notes, priority, due_date, assignees:task_assignees(member_key)",
+        "id, status, completed_at, title, notes, priority, due_date, link, assignees:task_assignees(member_key)",
       )
       .eq("id", parsed.data.id)
       .single();
@@ -368,6 +398,13 @@ export async function updateTaskAction(
       patch.due_date = parsed.data.due_date ?? null;
       changedFields.push("due_date");
     }
+    if (parsed.data.link !== undefined) {
+      const nextLink = parsed.data.link?.length ? parsed.data.link : null;
+      if (nextLink !== (current.link ?? null)) {
+        patch.link = nextLink;
+        changedFields.push("link");
+      }
+    }
     let statusChange: { from: TaskStatus; to: TaskStatus } | null = null;
     if (
       parsed.data.status !== undefined &&
@@ -394,10 +431,12 @@ export async function updateTaskAction(
       await setAssigneesAndLog(
         supabase,
         parsed.data.id,
+        current.title as string,
         parsed.data.assignee_keys,
         currentKeys,
         auth.userId,
         auth.email,
+        { notifyAssigned: true },
       );
     }
 
@@ -419,6 +458,34 @@ export async function updateTaskAction(
         actorEmail: auth.email,
         action: "updated",
         payload: { fields: nonStatusFields },
+      });
+    }
+
+    // Slack: announce status change + field edits using the assignee set
+    // we just wrote (i.e. the new keys).
+    const finalKeys =
+      parsed.data.assignee_keys !== undefined
+        ? parsed.data.assignee_keys
+        : currentKeys;
+    if (statusChange) {
+      await notifyTaskEvent({
+        kind: "status_changed",
+        taskId: parsed.data.id,
+        title: current.title as string,
+        assigneeKeys: finalKeys,
+        from: statusChange.from,
+        to: statusChange.to,
+        actorEmail: auth.email,
+      });
+    }
+    if (nonStatusFields.length > 0) {
+      await notifyTaskEvent({
+        kind: "updated",
+        taskId: parsed.data.id,
+        title: current.title as string,
+        assigneeKeys: finalKeys,
+        fields: nonStatusFields,
+        actorEmail: auth.email,
       });
     }
 
@@ -445,7 +512,9 @@ export async function toggleTaskDoneAction(
     const supabase = await createClient();
     const { data: current, error: readErr } = await supabase
       .from("tasks")
-      .select("status")
+      .select(
+        "status, title, assignees:task_assignees(member_key)",
+      )
       .eq("id", parsed.data)
       .single();
     if (readErr) throw new Error(readErr.message);
@@ -466,6 +535,22 @@ export async function toggleTaskDoneAction(
       actorEmail: auth.email,
       action: "status_changed",
       payload: { from: current.status as TaskStatus, to: nextStatus },
+    });
+
+    const assigneeKeys = Array.isArray(current.assignees)
+      ? current.assignees
+          .map((a) => (a as { member_key?: string }).member_key)
+          .filter((k): k is string => typeof k === "string")
+      : [];
+
+    await notifyTaskEvent({
+      kind: "status_changed",
+      taskId: parsed.data,
+      title: current.title as string,
+      assigneeKeys,
+      from: current.status as TaskStatus,
+      to: nextStatus,
+      actorEmail: auth.email,
     });
 
     const refreshed = await fetchTaskById(supabase, parsed.data);

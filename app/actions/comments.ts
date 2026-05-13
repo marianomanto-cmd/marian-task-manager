@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/result";
+import { notifyTaskEvent } from "@/lib/slack/notify";
 import { createClient } from "@/lib/supabase/server";
 
 export type TaskComment = {
@@ -104,16 +105,43 @@ export async function createCommentAction(
       .single();
     if (error) throw new Error(error.message);
 
+    const preview = parsed.data.body.slice(0, 200);
+
     // Best-effort activity log.
     try {
-      const preview = parsed.data.body.slice(0, 100);
       await supabase.from("task_activity").insert({
         task_id: parsed.data.task_id,
         actor_user_id: auth.userId,
         actor_email: auth.email,
         action: "commented",
-        payload: { comment_id: data.id, preview },
+        payload: { comment_id: data.id, preview: preview.slice(0, 100) },
       });
+    } catch {
+      /* swallow */
+    }
+
+    // Slack: pull the task title + assignees so the message has context.
+    try {
+      const { data: taskRow } = await supabase
+        .from("tasks")
+        .select("title, assignees:task_assignees(member_key)")
+        .eq("id", parsed.data.task_id)
+        .single();
+      if (taskRow) {
+        const assigneeKeys = Array.isArray(taskRow.assignees)
+          ? taskRow.assignees
+              .map((a) => (a as { member_key?: string }).member_key)
+              .filter((k): k is string => typeof k === "string")
+          : [];
+        await notifyTaskEvent({
+          kind: "commented",
+          taskId: parsed.data.task_id,
+          title: taskRow.title as string,
+          assigneeKeys,
+          preview,
+          actorEmail: auth.email,
+        });
+      }
     } catch {
       /* swallow */
     }
