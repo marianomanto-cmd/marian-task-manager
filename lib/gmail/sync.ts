@@ -94,27 +94,29 @@ export async function listMessageIdsFromHistory(
 }
 
 /**
- * Gmail returns 404 "Requested entity was not found." when `startHistoryId`
- * is older than the history Gmail still retains. That's not a real failure —
- * it just means we must re-bootstrap from a fresh message list. The status
- * code lives on the GaxiosError (not in `.message`), so check it directly
- * and fall back to a case-insensitive message match.
+ * True when a GaxiosError is an HTTP 404. The status lives on the error
+ * object (not in `.message`), and which field carries it varies by version.
  */
-function isHistoryResetError(err: unknown): boolean {
+function isNotFoundError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as {
     code?: unknown;
     status?: unknown;
     response?: { status?: unknown };
-    message?: unknown;
   };
-  const status =
-    (typeof e.code === "number" ? e.code : undefined) ??
-    (typeof e.status === "number" ? e.status : undefined) ??
-    (typeof e.response?.status === "number" ? e.response.status : undefined);
-  if (status === 404) return true;
-  const message =
-    typeof e.message === "string" ? e.message.toLowerCase() : "";
+  return e.code === 404 || e.status === 404 || e.response?.status === 404;
+}
+
+/**
+ * Gmail returns 404 "Requested entity was not found." when `startHistoryId`
+ * is older than the history Gmail still retains. That's not a real failure —
+ * it just means we must re-bootstrap from a fresh message list. Falls back
+ * to a case-insensitive message match in case the status isn't surfaced.
+ */
+function isHistoryResetError(err: unknown): boolean {
+  if (isNotFoundError(err)) return true;
+  const raw = (err as { message?: unknown })?.message;
+  const message = typeof raw === "string" ? raw.toLowerCase() : "";
   return (
     message.includes("not found") ||
     message.includes("historyid") ||
@@ -151,12 +153,19 @@ export async function getMessage(
   messageId: string,
 ): Promise<ParsedMessage | null> {
   const gmail = await getGmailClient();
-  const { data } = await gmail.users.messages.get({
-    userId: ME,
-    id: messageId,
-    format: "full",
-  });
-  return parseMessage(data);
+  try {
+    const { data } = await gmail.users.messages.get({
+      userId: ME,
+      id: messageId,
+      format: "full",
+    });
+    return parseMessage(data);
+  } catch (err) {
+    // A message can vanish between the id listing and this fetch (the user
+    // deleted it in Gmail). Skip it instead of failing the whole sync.
+    if (isNotFoundError(err)) return null;
+    throw err;
+  }
 }
 
 export function parseMessage(
