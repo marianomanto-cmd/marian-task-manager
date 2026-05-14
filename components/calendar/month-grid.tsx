@@ -80,6 +80,8 @@ export function MonthGrid({
           const isSelected = selectedDate
             ? isSameDay(date, selectedDate)
             : false;
+          const dow = date.getDay();
+          const isWeekend = dow === 0 || dow === 6;
 
           return (
             <button
@@ -88,7 +90,10 @@ export function MonthGrid({
               onClick={() => onSelectDate?.(date)}
               className={cn(
                 "group/cell relative flex min-h-20 flex-col items-stretch gap-1 border-t border-l p-1.5 text-left transition-colors first:border-l-0 hover:bg-accent/40 sm:min-h-24",
-                !inMonth && "bg-muted/20 text-muted-foreground",
+                isWeekend && inMonth && "bg-sky-50 dark:bg-sky-950/30",
+                isWeekend && !inMonth && "bg-sky-50/50 dark:bg-sky-950/15",
+                !inMonth && !isWeekend && "bg-muted/20 text-muted-foreground",
+                !inMonth && isWeekend && "text-muted-foreground",
                 isSelected && "bg-accent/60",
               )}
               aria-pressed={isSelected}

@@ -10,6 +10,7 @@ import {
   PENDING_AI_INVALIDATION_KEY,
   SYNC_LOG_INVALIDATION_KEY,
 } from "@/components/inbox/use-emails";
+import { TASKS_INVALIDATION_KEY } from "@/components/tasks/use-tasks";
 import { Button } from "@/components/ui/button";
 import { showToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ export function AnalyzeButton({ pendingCount, className }: AnalyzeButtonProps) {
         queryClient.invalidateQueries({ queryKey: EMAILS_INVALIDATION_KEY }),
         queryClient.invalidateQueries({ queryKey: SYNC_LOG_INVALIDATION_KEY }),
         queryClient.invalidateQueries({ queryKey: PENDING_AI_INVALIDATION_KEY }),
+        queryClient.invalidateQueries({ queryKey: TASKS_INVALIDATION_KEY }),
       ]);
       if (data.processed === 0) {
         showToast({
@@ -49,9 +51,13 @@ export function AnalyzeButton({ pendingCount, className }: AnalyzeButtonProps) {
         data.pendingRemaining > 0
           ? ` · quedan ${data.pendingRemaining} pendientes`
           : "";
+      const tasksLabel =
+        data.tasksCreated > 0
+          ? ` · ${data.tasksCreated} tarea${data.tasksCreated === 1 ? "" : "s"} creada${data.tasksCreated === 1 ? "" : "s"}`
+          : "";
       showToast({
         title: `${data.processed} mail${data.processed === 1 ? "" : "s"} analizado${data.processed === 1 ? "" : "s"}`,
-        description: `Claude clasificó la bandeja.${costLabel}${restLabel}`,
+        description: `Claude clasificó la bandeja${tasksLabel}.${costLabel}${restLabel}`,
         duration: 8_000,
       });
     },
