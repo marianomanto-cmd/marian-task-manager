@@ -34,28 +34,41 @@ export async function getGoogleAuthClient() {
     throw new GoogleAuthRequiredError("No active session.");
   }
 
-  const accessToken = data.session.provider_token ?? null;
-
   const { data: settings } = await supabase
     .from("user_settings")
     .select("gmail_refresh_token")
     .eq("user_id", data.session.user.id)
     .single();
   const refreshToken = settings?.gmail_refresh_token ?? null;
+  const accessToken = data.session.provider_token ?? null;
 
-  if (!accessToken && !refreshToken) {
+  if (!refreshToken && !accessToken) {
     throw new GoogleAuthRequiredError(
       "Missing Google provider token. Sign in again to grant access.",
     );
   }
 
-  const auth = new google.auth.OAuth2(
-    process.env.GOOGLE_OAUTH_CLIENT_ID,
-    process.env.GOOGLE_OAUTH_CLIENT_SECRET,
-  );
-  auth.setCredentials({
-    access_token: accessToken ?? undefined,
-    refresh_token: refreshToken ?? undefined,
-  });
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+
+  // A refresh token is useless without the OAuth client credentials —
+  // googleapis needs them to exchange it for a fresh access token. Surface
+  // this as a plain error (not GoogleAuthRequiredError) so the UI shows the
+  // real cause instead of looping the user through another sign-in.
+  if (refreshToken && (!clientId || !clientSecret)) {
+    throw new Error(
+      "Google sync is misconfigured: GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET are not set on the server.",
+    );
+  }
+
+  const auth = new google.auth.OAuth2(clientId, clientSecret);
+  if (refreshToken) {
+    // Prefer the refresh token: the session's provider_token is often stale
+    // by the time a sync runs, and googleapis will mint (and cache) a fresh
+    // access token on demand from the refresh token.
+    auth.setCredentials({ refresh_token: refreshToken });
+  } else {
+    auth.setCredentials({ access_token: accessToken ?? undefined });
+  }
   return auth;
 }
