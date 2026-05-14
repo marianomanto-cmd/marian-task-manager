@@ -141,42 +141,6 @@ export async function setMessageReadOnGmail(
   });
 }
 
-/**
- * Re-fetches the current label set for a list of gmail message ids and
- * returns the read state for each. Used by the one-shot backfill that
- * brings pre-migration-0012 rows up to date with Gmail.
- */
-export async function fetchReadStates(
-  gmailMessageIds: string[],
-): Promise<Map<string, boolean>> {
-  const gmail = await getGmailClient();
-  const out = new Map<string, boolean>();
-  const BATCH = 10;
-  for (let i = 0; i < gmailMessageIds.length; i += BATCH) {
-    const chunk = gmailMessageIds.slice(i, i + BATCH);
-    const results = await Promise.all(
-      chunk.map(async (id) => {
-        try {
-          const { data } = await gmail.users.messages.get({
-            userId: ME,
-            id,
-            format: "metadata",
-            metadataHeaders: [],
-          });
-          return { id, labelIds: data.labelIds ?? [] };
-        } catch {
-          return null;
-        }
-      }),
-    );
-    for (const r of results) {
-      if (!r) continue;
-      out.set(r.id, !r.labelIds.includes("UNREAD"));
-    }
-  }
-  return out;
-}
-
 export async function getCurrentHistoryId(): Promise<string | null> {
   const gmail = await getGmailClient();
   const { data } = await gmail.users.getProfile({ userId: ME });
