@@ -9,9 +9,15 @@ import {
   deleteTaskAction,
   updateTaskAction,
 } from "@/app/actions/tasks";
+import { uploadTaskImageAction } from "@/app/actions/task-images";
 import { useCurrentUser } from "@/components/hooks/use-user";
 import { AssigneePicker } from "@/components/tasks/assignee-picker";
 import { TaskComments } from "@/components/tasks/task-comments";
+import {
+  TaskImages,
+  taskImagesKey,
+  type PendingImage,
+} from "@/components/tasks/task-images";
 import { TASKS_INVALIDATION_KEY } from "@/components/tasks/use-tasks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +48,7 @@ const formSchema = z.object({
     .or(z.literal("")),
   link: z.string().trim().max(2000).optional(),
   assignee_keys: z.array(z.string()).default([]),
+  notified_keys: z.array(z.string()).default([]),
 });
 
 type FormState = z.infer<typeof formSchema>;
@@ -55,6 +62,7 @@ function defaults(entry: Task | null | undefined): FormState {
     due_date: entry?.due_date ?? "",
     link: entry?.link ?? "",
     assignee_keys: entry?.assignees ?? [],
+    notified_keys: entry?.notified ?? [],
   };
 }
 
@@ -78,6 +86,49 @@ export function TaskForm({ task, onSaved, onDeleted, onCancel }: TaskFormProps) 
   const [fieldErrors, setFieldErrors] = React.useState<
     Partial<Record<keyof FormState | "form", string>>
   >({});
+  // Images pasted before the task is saved — uploaded once we have a task id.
+  const [pendingImages, setPendingImages] = React.useState<PendingImage[]>([]);
+  const pendingRef = React.useRef<PendingImage[]>([]);
+  React.useEffect(() => {
+    pendingRef.current = pendingImages;
+  }, [pendingImages]);
+  React.useEffect(() => {
+    // Revoke any object URLs still around when the form unmounts.
+    return () => {
+      pendingRef.current.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+    };
+  }, []);
+
+  function removePending(id: string) {
+    setPendingImages((prev) => {
+      const found = prev.find((p) => p.id === id);
+      if (found) URL.revokeObjectURL(found.previewUrl);
+      return prev.filter((p) => p.id !== id);
+    });
+  }
+
+  function handlePaste(event: React.ClipboardEvent) {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length === 0) return; // let normal text paste through
+    event.preventDefault();
+    setPendingImages((prev) => [
+      ...prev,
+      ...files.map((file) => ({
+        id: crypto.randomUUID(),
+        blob: file,
+        previewUrl: URL.createObjectURL(file),
+      })),
+    ]);
+  }
 
   const saveMutation = useMutation({
     mutationFn: async (input: FormState) => {
@@ -90,17 +141,33 @@ export function TaskForm({ task, onSaved, onDeleted, onCancel }: TaskFormProps) 
           input.due_date && input.due_date.length > 0 ? input.due_date : null,
         link: input.link && input.link.length > 0 ? input.link : null,
         assignee_keys: input.assignee_keys,
+        notified_keys: input.notified_keys,
       };
       const result = task
         ? await updateTaskAction({ id: task.id, ...payload })
         : await createTaskAction(payload);
       if (!result.ok) throw new Error(result.message);
-      return result.data;
+      const savedTask = result.data;
+
+      // Now that the task exists, push up any images pasted into the form.
+      for (const image of pendingImages) {
+        const fd = new FormData();
+        fd.append("taskId", savedTask.id);
+        fd.append("file", image.blob, "pasted-image");
+        const uploaded = await uploadTaskImageAction(fd);
+        if (!uploaded.ok) throw new Error(uploaded.message);
+      }
+      return savedTask;
     },
-    onSuccess: async () => {
+    onSuccess: async (savedTask) => {
+      pendingImages.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+      setPendingImages([]);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: TASKS_INVALIDATION_KEY }),
         queryClient.invalidateQueries({ queryKey: ["activity"] }),
+        queryClient.invalidateQueries({
+          queryKey: taskImagesKey(savedTask.id),
+        }),
       ]);
       onSaved?.();
     },
@@ -148,9 +215,30 @@ export function TaskForm({ task, onSaved, onDeleted, onCancel }: TaskFormProps) 
 
   const submitting = saveMutation.isPending || deleteMutation.isPending;
 
+  // Assigned and notified are mutually exclusive: a task changes hands, so
+  // adding someone to one role pulls them out of the other.
+  function setAssignees(keys: string[]) {
+    setState((prev) => ({
+      ...prev,
+      assignee_keys: keys,
+      notified_keys: prev.notified_keys.filter((k) => !keys.includes(k)),
+    }));
+  }
+  function setNotified(keys: string[]) {
+    setState((prev) => ({
+      ...prev,
+      notified_keys: keys,
+      assignee_keys: prev.assignee_keys.filter((k) => !keys.includes(k)),
+    }));
+  }
+
   return (
     <div className="flex flex-col gap-4">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <form
+        onSubmit={handleSubmit}
+        onPaste={handlePaste}
+        className="flex flex-col gap-4"
+      >
         <div className="space-y-1.5">
           <Label htmlFor="task-title">Título</Label>
           <Input
@@ -182,14 +270,34 @@ export function TaskForm({ task, onSaved, onDeleted, onCancel }: TaskFormProps) 
         </div>
 
         <div className="space-y-1.5">
+          <Label>Imágenes</Label>
+          <TaskImages
+            taskId={task?.id ?? null}
+            pending={pendingImages}
+            onRemovePending={removePending}
+            disabled={submitting}
+          />
+        </div>
+
+        <div className="space-y-1.5">
           <Label>Asignados</Label>
           <AssigneePicker
             value={state.assignee_keys}
-            onChange={(keys) =>
-              setState((prev) => ({ ...prev, assignee_keys: keys }))
-            }
+            onChange={setAssignees}
             disabled={submitting}
           />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Notificados</Label>
+          <AssigneePicker
+            value={state.notified_keys}
+            onChange={setNotified}
+            disabled={submitting}
+          />
+          <p className="text-muted-foreground text-xs">
+            Reciben las novedades por Slack sin ser responsables de la tarea.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

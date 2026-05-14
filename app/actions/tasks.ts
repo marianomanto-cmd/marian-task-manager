@@ -16,7 +16,8 @@ import {
 const SELECT_COLUMNS = `
   id, user_id, project_id, email_id, title, notes, status, priority,
   due_date, completed_at, created_at, updated_at, link,
-  assignees:task_assignees(member_key)
+  assignees:task_assignees(member_key),
+  notified:task_notified(member_key)
 `;
 
 const statusSchema = z.enum(TASK_STATUSES as readonly [TaskStatus, ...TaskStatus[]]);
@@ -50,6 +51,7 @@ const createSchema = z.object({
   due_date: dateSchema.optional().nullable(),
   link: linkSchema.optional().nullable(),
   assignee_keys: z.array(memberKeySchema).max(20).default([]),
+  notified_keys: z.array(memberKeySchema).max(20).default([]),
 });
 
 const updateSchema = z.object({
@@ -61,6 +63,7 @@ const updateSchema = z.object({
   due_date: dateSchema.optional().nullable(),
   link: linkSchema.optional().nullable(),
   assignee_keys: z.array(memberKeySchema).max(20).optional(),
+  notified_keys: z.array(memberKeySchema).max(20).optional(),
 });
 
 export type CreateTaskInput = z.infer<typeof createSchema>;
@@ -104,16 +107,25 @@ function asUnknown(err: unknown): ActionResult<never> {
   };
 }
 
-function normalizeTaskRow(raw: unknown): Task {
-  const r = { ...(raw as Record<string, unknown>) };
-  const assigneesField = r.assignees;
-  const assignees = Array.isArray(assigneesField)
-    ? assigneesField
+function memberKeysFrom(field: unknown): string[] {
+  return Array.isArray(field)
+    ? field
         .map((a) => (a as { member_key?: string }).member_key)
         .filter((k): k is string => typeof k === "string")
     : [];
+}
+
+function normalizeTaskRow(raw: unknown): Task {
+  const r = { ...(raw as Record<string, unknown>) };
+  const assignees = memberKeysFrom(r.assignees);
+  const notified = memberKeysFrom(r.notified);
   delete r.assignees;
-  return { ...(r as Omit<Task, "assignees">), assignees };
+  delete r.notified;
+  return {
+    ...(r as Omit<Task, "assignees" | "notified">),
+    assignees,
+    notified,
+  };
 }
 
 /**
@@ -228,6 +240,59 @@ async function setAssigneesAndLog(
   return { added: toAdd, removed: toRemove };
 }
 
+/**
+ * Diffs the task's "notified" set and persists it. Notified people are kept
+ * in the loop but don't own the task — we don't write task_activity rows for
+ * them (the feed tracks ownership), only Slack DMs for newly added ones when
+ * `options.notify` is set.
+ */
+async function setNotifiedMembers(
+  supabase: SupabaseServerClient,
+  taskId: string,
+  taskTitle: string,
+  nextKeys: string[],
+  currentKeys: string[],
+  actorUserId: string,
+  actorEmail: string | null,
+  options: { notify?: boolean } = {},
+): Promise<void> {
+  const currentSet = new Set(currentKeys);
+  const nextSet = new Set(nextKeys);
+  const toAdd = [...nextSet].filter((k) => !currentSet.has(k));
+  const toRemove = [...currentSet].filter((k) => !nextSet.has(k));
+
+  if (toAdd.length > 0) {
+    const { error } = await supabase.from("task_notified").insert(
+      toAdd.map((member_key) => ({
+        task_id: taskId,
+        member_key,
+        notified_by: actorUserId,
+      })),
+    );
+    if (error) throw new Error(error.message);
+    if (options.notify) {
+      for (const member_key of toAdd) {
+        await notifyTaskEvent({
+          kind: "notified",
+          taskId,
+          title: taskTitle,
+          newNotifiedKey: member_key,
+          actorEmail,
+        });
+      }
+    }
+  }
+
+  if (toRemove.length > 0) {
+    const { error } = await supabase
+      .from("task_notified")
+      .delete()
+      .eq("task_id", taskId)
+      .in("member_key", toRemove);
+    if (error) throw new Error(error.message);
+  }
+}
+
 export async function listTasksAction(
   input: ListTasksInput = {},
 ): Promise<ActionResult<Task[]>> {
@@ -334,6 +399,20 @@ export async function createTaskAction(
       );
     }
 
+    // Persist initial notified members. No per-key DM — the combined
+    // "created" notification below covers them too.
+    if (parsed.data.notified_keys.length > 0) {
+      await setNotifiedMembers(
+        supabase,
+        taskId,
+        parsed.data.title,
+        parsed.data.notified_keys,
+        [],
+        auth.userId,
+        auth.email,
+      );
+    }
+
     await logActivity(supabase, {
       taskId,
       actorUserId: auth.userId,
@@ -347,6 +426,7 @@ export async function createTaskAction(
       taskId,
       title: parsed.data.title,
       assigneeKeys: parsed.data.assignee_keys,
+      notifiedKeys: parsed.data.notified_keys,
       actorEmail: auth.email,
     });
 
@@ -374,17 +454,14 @@ export async function updateTaskAction(
     const { data: current, error: fetchErr } = await supabase
       .from("tasks")
       .select(
-        "id, status, completed_at, title, notes, priority, due_date, link, assignees:task_assignees(member_key)",
+        "id, status, completed_at, title, notes, priority, due_date, link, assignees:task_assignees(member_key), notified:task_notified(member_key)",
       )
       .eq("id", parsed.data.id)
       .single();
     if (fetchErr) throw new Error(fetchErr.message);
 
-    const currentKeys = Array.isArray(current.assignees)
-      ? current.assignees
-          .map((a) => (a as { member_key?: string }).member_key)
-          .filter((k): k is string => typeof k === "string")
-      : [];
+    const currentKeys = memberKeysFrom(current.assignees);
+    const currentNotifiedKeys = memberKeysFrom(current.notified);
 
     const patch: Record<string, unknown> = {};
     const changedFields: string[] = [];
@@ -459,6 +536,19 @@ export async function updateTaskAction(
       );
     }
 
+    if (parsed.data.notified_keys !== undefined) {
+      await setNotifiedMembers(
+        supabase,
+        parsed.data.id,
+        current.title as string,
+        parsed.data.notified_keys,
+        currentNotifiedKeys,
+        auth.userId,
+        auth.email,
+        { notify: true },
+      );
+    }
+
     if (statusChange) {
       await logActivity(supabase, {
         taskId: parsed.data.id,
@@ -480,18 +570,23 @@ export async function updateTaskAction(
       });
     }
 
-    // Slack: announce status change + field edits using the assignee set
-    // we just wrote (i.e. the new keys).
+    // Slack: announce status change + field edits using the member sets we
+    // just wrote (i.e. the new keys).
     const finalKeys =
       parsed.data.assignee_keys !== undefined
         ? parsed.data.assignee_keys
         : currentKeys;
+    const finalNotifiedKeys =
+      parsed.data.notified_keys !== undefined
+        ? parsed.data.notified_keys
+        : currentNotifiedKeys;
     if (statusChange) {
       await notifyTaskEvent({
         kind: "status_changed",
         taskId: parsed.data.id,
         title: current.title as string,
         assigneeKeys: finalKeys,
+        notifiedKeys: finalNotifiedKeys,
         from: statusChange.from,
         to: statusChange.to,
         actorEmail: auth.email,
@@ -503,6 +598,7 @@ export async function updateTaskAction(
         taskId: parsed.data.id,
         title: current.title as string,
         assigneeKeys: finalKeys,
+        notifiedKeys: finalNotifiedKeys,
         fields: nonStatusFields,
         actorEmail: auth.email,
       });
@@ -532,7 +628,7 @@ export async function toggleTaskDoneAction(
     const { data: current, error: readErr } = await supabase
       .from("tasks")
       .select(
-        "status, title, assignees:task_assignees(member_key)",
+        "status, title, assignees:task_assignees(member_key), notified:task_notified(member_key)",
       )
       .eq("id", parsed.data)
       .single();
@@ -556,17 +652,12 @@ export async function toggleTaskDoneAction(
       payload: { from: current.status as TaskStatus, to: nextStatus },
     });
 
-    const assigneeKeys = Array.isArray(current.assignees)
-      ? current.assignees
-          .map((a) => (a as { member_key?: string }).member_key)
-          .filter((k): k is string => typeof k === "string")
-      : [];
-
     await notifyTaskEvent({
       kind: "status_changed",
       taskId: parsed.data,
       title: current.title as string,
-      assigneeKeys,
+      assigneeKeys: memberKeysFrom(current.assignees),
+      notifiedKeys: memberKeysFrom(current.notified),
       from: current.status as TaskStatus,
       to: nextStatus,
       actorEmail: auth.email,
