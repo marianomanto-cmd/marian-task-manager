@@ -85,16 +85,41 @@ export async function listMessageIdsFromHistory(
       latestHistoryId: data.historyId ?? null,
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (
-      message.includes("historyId") ||
-      message.includes("404") ||
-      message.includes("Not Found")
-    ) {
-      return { reset: true, reason: message };
+    if (isHistoryResetError(err)) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return { reset: true, reason };
     }
     throw err;
   }
+}
+
+/**
+ * Gmail returns 404 "Requested entity was not found." when `startHistoryId`
+ * is older than the history Gmail still retains. That's not a real failure —
+ * it just means we must re-bootstrap from a fresh message list. The status
+ * code lives on the GaxiosError (not in `.message`), so check it directly
+ * and fall back to a case-insensitive message match.
+ */
+function isHistoryResetError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as {
+    code?: unknown;
+    status?: unknown;
+    response?: { status?: unknown };
+    message?: unknown;
+  };
+  const status =
+    (typeof e.code === "number" ? e.code : undefined) ??
+    (typeof e.status === "number" ? e.status : undefined) ??
+    (typeof e.response?.status === "number" ? e.response.status : undefined);
+  if (status === 404) return true;
+  const message =
+    typeof e.message === "string" ? e.message.toLowerCase() : "";
+  return (
+    message.includes("not found") ||
+    message.includes("historyid") ||
+    message.includes("requested entity")
+  );
 }
 
 /**
