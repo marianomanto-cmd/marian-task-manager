@@ -15,32 +15,47 @@ export class GoogleAuthRequiredError extends Error {
 }
 
 /**
- * Reads the Google access token Supabase Auth stored on the active session
- * after the user signed in. Valid ~1h. When it expires the user re-logs in;
- * we deliberately do NOT persist a refresh token yet (manual sync only).
+ * Builds a configured googleapis OAuth2 client.
+ *
+ * Supabase only keeps the Google `provider_token` (access token, ~1h life)
+ * on the session right after login and never refreshes it. To keep syncs
+ * working past that window we persist the `provider_refresh_token` in
+ * `user_settings.gmail_refresh_token` at login time (see the auth callback)
+ * and hand it to the OAuth2 client here, so googleapis can mint fresh access
+ * tokens on demand.
+ *
+ * Each API client (calendar, gmail) takes this and instantiates its own
+ * typed wrapper.
  */
-export async function getProviderAccessToken(): Promise<string> {
+export async function getGoogleAuthClient() {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.getSession();
   if (error || !data.session) {
     throw new GoogleAuthRequiredError("No active session.");
   }
-  const token = data.session.provider_token;
-  if (!token) {
+
+  const accessToken = data.session.provider_token ?? null;
+
+  const { data: settings } = await supabase
+    .from("user_settings")
+    .select("gmail_refresh_token")
+    .eq("user_id", data.session.user.id)
+    .single();
+  const refreshToken = settings?.gmail_refresh_token ?? null;
+
+  if (!accessToken && !refreshToken) {
     throw new GoogleAuthRequiredError(
       "Missing Google provider token. Sign in again to grant access.",
     );
   }
-  return token;
-}
 
-/**
- * Builds a configured googleapis OAuth2 client. Each API client (calendar,
- * gmail) takes this and instantiates its own typed wrapper.
- */
-export async function getGoogleAuthClient() {
-  const accessToken = await getProviderAccessToken();
-  const auth = new google.auth.OAuth2();
-  auth.setCredentials({ access_token: accessToken });
+  const auth = new google.auth.OAuth2(
+    process.env.GOOGLE_OAUTH_CLIENT_ID,
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+  );
+  auth.setCredentials({
+    access_token: accessToken ?? undefined,
+    refresh_token: refreshToken ?? undefined,
+  });
   return auth;
 }
