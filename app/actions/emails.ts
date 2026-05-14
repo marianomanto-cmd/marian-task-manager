@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/result";
 import { GoogleAuthRequiredError } from "@/lib/google/auth";
-import { fetchReadStates, setMessageReadOnGmail } from "@/lib/gmail/sync";
+import { setMessageReadOnGmail } from "@/lib/gmail/sync";
 import type { Email, EmailAi } from "@/lib/gmail/types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -209,72 +209,6 @@ export async function markEmailReadAction(
     }
     return { ok: true, data: normalizeEmailRow(data) };
   } catch (err) {
-    return asUnknown(err);
-  }
-}
-
-/**
- * One-shot: re-fetch the current UNREAD label for every email in our DB
- * and update is_read accordingly. Useful right after migration 0012 to
- * bring pre-migration rows in line with Gmail. Capped at 500 rows per call
- * so a huge mailbox can be paginated by re-running.
- */
-export async function backfillReadStateAction(): Promise<
-  ActionResult<{ checked: number; updated: number }>
-> {
-  const auth = await requireUserId();
-  if (!auth.ok) return auth.result;
-
-  try {
-    const supabase = await createClient();
-    const { data: rows, error } = await supabase
-      .from("emails")
-      .select("id, gmail_message_id, is_read")
-      .eq("user_id", auth.userId)
-      .order("received_at", { ascending: false })
-      .limit(500);
-    if (error) throw new Error(error.message);
-    if (!rows || rows.length === 0) {
-      return { ok: true, data: { checked: 0, updated: 0 } };
-    }
-
-    const gmailIds = rows.map((r) => r.gmail_message_id as string);
-    const states = await fetchReadStates(gmailIds);
-
-    let updated = 0;
-    // Group ids by next state, then issue at most two UPDATEs.
-    const toRead: string[] = [];
-    const toUnread: string[] = [];
-    for (const row of rows) {
-      const want = states.get(row.gmail_message_id as string);
-      if (typeof want !== "boolean") continue;
-      if (want !== row.is_read) {
-        if (want) toRead.push(row.id as string);
-        else toUnread.push(row.id as string);
-      }
-    }
-    if (toRead.length > 0) {
-      await supabase
-        .from("emails")
-        .update({ is_read: true })
-        .eq("user_id", auth.userId)
-        .in("id", toRead);
-      updated += toRead.length;
-    }
-    if (toUnread.length > 0) {
-      await supabase
-        .from("emails")
-        .update({ is_read: false })
-        .eq("user_id", auth.userId)
-        .in("id", toUnread);
-      updated += toUnread.length;
-    }
-
-    return { ok: true, data: { checked: rows.length, updated } };
-  } catch (err) {
-    if (err instanceof GoogleAuthRequiredError) {
-      return { ok: false, code: "auth_required", message: err.message };
-    }
     return asUnknown(err);
   }
 }

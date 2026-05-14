@@ -19,6 +19,8 @@ export type Task = {
   link: string | null;
   /** team_members keys assigned to this task. */
   assignees: string[];
+  /** team_members keys kept in the loop without owning the task. */
+  notified: string[];
 };
 
 export const TASK_STATUSES: readonly TaskStatus[] = [

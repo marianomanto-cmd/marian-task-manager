@@ -1,11 +1,15 @@
 /**
- * Best-effort Slack notifier. For each task event we DM every assignee
+ * Best-effort Slack notifier. For each task event we DM every recipient
  * (except the actor) individually via `chat.postMessage` using the bot
  * token in `SLACK_BOT_TOKEN`.
  *
+ * Recipients come in two roles: "assignee" (owns the task) and "notified"
+ * (kept in the loop). Both get the same broadcast events; only the wording
+ * differs where it reads better in second person.
+ *
  * Never throws — a failed notification must not abort the parent action.
  * If the bot token is missing the function is a no-op so local dev stays
- * quiet. Assignees without a configured `slackUserId` are silently
+ * quiet. Recipients without a configured `slackUserId` are silently
  * skipped (we can't DM someone we can't address).
  */
 
@@ -19,12 +23,15 @@ import {
   getMemberByKey,
 } from "@/lib/team/members";
 
+type Role = "assignee" | "notified";
+
 export type TaskEvent =
   | {
       kind: "created";
       taskId: string;
       title: string;
       assigneeKeys: string[];
+      notifiedKeys: string[];
       actorEmail: string | null;
     }
   | {
@@ -32,6 +39,7 @@ export type TaskEvent =
       taskId: string;
       title: string;
       assigneeKeys: string[];
+      notifiedKeys: string[];
       from: TaskStatus;
       to: TaskStatus;
       actorEmail: string | null;
@@ -41,6 +49,7 @@ export type TaskEvent =
       taskId: string;
       title: string;
       assigneeKeys: string[];
+      notifiedKeys: string[];
       preview: string;
       actorEmail: string | null;
     }
@@ -49,6 +58,7 @@ export type TaskEvent =
       taskId: string;
       title: string;
       assigneeKeys: string[];
+      notifiedKeys: string[];
       fields: string[];
       actorEmail: string | null;
     }
@@ -57,6 +67,13 @@ export type TaskEvent =
       taskId: string;
       title: string;
       newAssigneeKey: string;
+      actorEmail: string | null;
+    }
+  | {
+      kind: "notified";
+      taskId: string;
+      title: string;
+      newNotifiedKey: string;
       actorEmail: string | null;
     };
 
@@ -84,20 +101,24 @@ function taskUrl(taskId: string): string | null {
 }
 
 /**
- * Build the message text for a given recipient. We pass the recipient
- * because some events read more naturally in second person ("te asignó")
- * once we know we're talking to that specific user.
+ * Build the message text for a given recipient. The role only changes the
+ * wording of events that read in second person ("te asignó" vs "te puso
+ * como notificado"); the rest are role-neutral.
  */
-function buildText(event: TaskEvent): string {
+function buildText(event: TaskEvent, role: Role): string {
   const actor = displayNameForEmail(event.actorEmail);
   const url = taskUrl(event.taskId);
   const titleLink = url ? `<${url}|${event.title}>` : `*${event.title}*`;
 
   switch (event.kind) {
     case "created":
-      return `📌 ${actor} creó la tarea ${titleLink} y te asignó.`;
+      return role === "assignee"
+        ? `📌 ${actor} creó la tarea ${titleLink} y te asignó.`
+        : `📋 ${actor} creó la tarea ${titleLink} y te puso como notificado.`;
     case "assigned":
       return `📌 ${actor} te asignó a la tarea ${titleLink}.`;
+    case "notified":
+      return `📋 ${actor} te agregó como notificado en la tarea ${titleLink}.`;
     case "status_changed":
       return `🔄 ${actor} movió ${titleLink} a *${TASK_STATUS_LABEL[event.to]}*.`;
     case "commented": {
@@ -181,30 +202,49 @@ async function postDM(userId: string, text: string): Promise<void> {
 }
 
 /**
- * Resolve which member keys should receive a DM for this event. We
- * always exclude the actor (no self-pings).
+ * Resolve which members should receive a DM for this event, tagged with
+ * their role. The actor is always excluded (no self-pings), and someone
+ * who is both assignee and notified is DM'd once as an assignee.
  */
-function recipientsFor(event: TaskEvent): string[] {
+function recipientsFor(event: TaskEvent): { key: string; role: Role }[] {
   const actorKey = getMemberByEmail(event.actorEmail)?.key ?? null;
   if (event.kind === "assigned") {
-    return event.newAssigneeKey === actorKey ? [] : [event.newAssigneeKey];
+    return event.newAssigneeKey === actorKey
+      ? []
+      : [{ key: event.newAssigneeKey, role: "assignee" }];
   }
-  return event.assigneeKeys.filter((k) => k !== actorKey);
+  if (event.kind === "notified") {
+    return event.newNotifiedKey === actorKey
+      ? []
+      : [{ key: event.newNotifiedKey, role: "notified" }];
+  }
+  const seen = new Set<string>();
+  const out: { key: string; role: Role }[] = [];
+  for (const key of event.assigneeKeys) {
+    if (key === actorKey || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, role: "assignee" });
+  }
+  for (const key of event.notifiedKeys) {
+    if (key === actorKey || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, role: "notified" });
+  }
+  return out;
 }
 
 export async function notifyTaskEvent(event: TaskEvent): Promise<void> {
   if (!process.env.SLACK_BOT_TOKEN) return;
   const recipients = recipientsFor(event);
   if (recipients.length === 0) return;
-  const text = buildText(event);
 
   // Fire DMs concurrently. Each postDM swallows its own errors, so a
   // single failure doesn't block the others.
   await Promise.all(
-    recipients.map((key) => {
+    recipients.map(({ key, role }) => {
       const member = getMemberByKey(key);
       if (!member?.slackUserId) return Promise.resolve();
-      return postDM(member.slackUserId, text);
+      return postDM(member.slackUserId, buildText(event, role));
     }),
   );
 }

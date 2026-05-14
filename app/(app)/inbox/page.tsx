@@ -13,7 +13,6 @@ import { es } from "date-fns/locale";
 import { Inbox, RefreshCw } from "lucide-react";
 
 import { AnalyzeButton } from "@/components/inbox/analyze-button";
-import { BackfillReadButton } from "@/components/inbox/backfill-read-button";
 import { EmailCard } from "@/components/inbox/email-card";
 import { FilterPopover } from "@/components/inbox/filter-popover";
 import { SavedFilterChips } from "@/components/inbox/saved-filter-chips";
@@ -154,7 +153,6 @@ export default function InboxPage() {
               className={cn(emailsQuery.isFetching && "animate-spin")}
             />
           </Button>
-          <BackfillReadButton />
           <AnalyzeButton pendingCount={pendingAiQuery.data ?? undefined} />
           <SyncButton />
         </div>

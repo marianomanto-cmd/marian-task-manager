@@ -14,6 +14,10 @@ const ERROR_MESSAGES: Record<string, string> = {
     "Tu cuenta no pertenece al dominio @sangria.agency. Pedile a Mariano que te sume.",
   auth_callback_failed:
     "No pudimos completar el login con Google. Probá de nuevo.",
+  no_refresh_token:
+    "Google no otorgó acceso offline. Volvé a iniciar sesión y aceptá todos los permisos.",
+  token_persist_failed:
+    "No pudimos guardar el acceso a Google. Probá de nuevo en unos segundos.",
 };
 
 export default async function LoginPage({
