@@ -70,11 +70,11 @@ function deadlineLabel(raw: string): string | null {
   }
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
-  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+function attachmentUrl(
+  emailId: string,
+  a: { id: string; filename: string; mime: string },
+): string {
+  return `/api/attachments/${emailId}/${encodeURIComponent(a.id)}?name=${encodeURIComponent(a.filename)}&mime=${encodeURIComponent(a.mime)}`;
 }
 
 export function EmailCard({ email }: { email: Email }) {
@@ -139,6 +139,22 @@ export function EmailCard({ email }: { email: Email }) {
 
   const isUnread = !email.is_read;
   const attachments = email.attachments_meta ?? [];
+
+  function downloadAttachments(e: React.MouseEvent) {
+    e.stopPropagation();
+    // Trigger each download from a throwaway anchor, slightly staggered so
+    // the browser doesn't drop concurrent same-origin downloads.
+    attachments.forEach((a, i) => {
+      window.setTimeout(() => {
+        const link = document.createElement("a");
+        link.href = attachmentUrl(email.id, a);
+        link.download = a.filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }, i * 300);
+    });
+  }
 
   return (
     <li
@@ -306,26 +322,22 @@ export function EmailCard({ email }: { email: Email }) {
         </div>
       </div>
 
-      {/* Attachments live on a separate row so the download <a>s can sit
-          outside the parent "Abrir en Gmail" link without nesting anchors. */}
+      {/* A single download button instead of one pill per file — keeps the
+          card compact for mails with many attachments. */}
       {attachments.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1 pt-2 pl-11">
-          {attachments.map((a) => (
-            <a
-              key={a.id}
-              href={`/api/attachments/${email.id}/${encodeURIComponent(a.id)}?name=${encodeURIComponent(a.filename)}&mime=${encodeURIComponent(a.mime)}`}
-              download={a.filename}
-              onClick={(e) => e.stopPropagation()}
-              title={`${a.filename} · ${formatBytes(a.size)}`}
-              className="bg-card hover:bg-accent inline-flex max-w-[220px] items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium"
-            >
-              <Download className="text-muted-foreground size-3 shrink-0" />
-              <span className="truncate">{a.filename}</span>
-              <span className="text-muted-foreground shrink-0">
-                {formatBytes(a.size)}
-              </span>
-            </a>
-          ))}
+        <div className="pt-2 pl-11">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={downloadAttachments}
+            className="h-7 gap-1.5 text-xs"
+          >
+            <Download className="size-3" />
+            {attachments.length === 1
+              ? "Descargar adjunto"
+              : `Descargar adjuntos (${attachments.length})`}
+          </Button>
         </div>
       ) : null}
     </li>
