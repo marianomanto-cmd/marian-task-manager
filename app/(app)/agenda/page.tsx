@@ -18,11 +18,18 @@ import { OOOForm } from "@/components/agenda/ooo-form";
 import { useHolidays } from "@/components/agenda/use-holidays";
 import { useOooEntries } from "@/components/agenda/use-ooo";
 import { MonthGrid } from "@/components/calendar/month-grid";
+import { TaskForm } from "@/components/tasks/task-form";
+import { useTasks } from "@/components/tasks/use-tasks";
 import { Button } from "@/components/ui/button";
 import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
 import { HOLIDAY_COUNTRY_META, type Holiday } from "@/lib/holidays/types";
 import type { OooEntry } from "@/lib/ooo/types";
-import { colorForMemberKey, TEAM_MEMBERS } from "@/lib/team/members";
+import {
+  colorForMemberKey,
+  getMemberByKey,
+  TEAM_MEMBERS,
+} from "@/lib/team/members";
+import type { Task, TaskPriority } from "@/lib/tasks/types";
 import { cn } from "@/lib/utils";
 
 const WEEK_STARTS_ON = 1 as const;
@@ -88,6 +95,101 @@ function addOneDay(dateKey: string): string {
   return next.toISOString().slice(0, 10);
 }
 
+const PRIORITY_RANK: Record<TaskPriority, number> = { high: 3, medium: 2, low: 1 };
+
+function buildTasksDueIndex(tasks: Task[]): Map<string, Task[]> {
+  const map = new Map<string, Task[]>();
+  for (const t of tasks) {
+    if (!t.due_date) continue;
+    const list = map.get(t.due_date) ?? [];
+    list.push(t);
+    map.set(t.due_date, list);
+  }
+  for (const list of map.values()) {
+    list.sort((a, b) => {
+      const p = PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority];
+      if (p !== 0) return p;
+      return a.title.localeCompare(b.title);
+    });
+  }
+  return map;
+}
+
+function initialFor(name: string): string {
+  const trimmed = name.trim();
+  return trimmed.length > 0 ? trimmed[0].toUpperCase() : "?";
+}
+
+type TaskDueCardProps = {
+  task: Task;
+  onOpen: (task: Task) => void;
+};
+
+function TaskDueCard({ task, onOpen }: TaskDueCardProps) {
+  const members = task.assignees
+    .map((k) => getMemberByKey(k))
+    .filter((m): m is NonNullable<typeof m> => m !== null);
+  const visible = members.slice(0, 2);
+  const overflow = Math.max(0, members.length - visible.length);
+  const isDone = task.status === "done";
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen(task);
+      }}
+      title={`Vence: ${task.title}`}
+      className={cn(
+        "bg-card hover:bg-accent flex w-full items-center gap-1 overflow-hidden rounded border px-1 py-0.5 text-left text-[10px] leading-tight",
+        task.priority === "high" && "border-rose-500/60",
+        task.priority === "medium" && "border-amber-500/50",
+        task.priority === "low" && "border-muted-foreground/30",
+        isDone && "opacity-60",
+      )}
+    >
+      {visible.length > 0 ? (
+        <span className="flex shrink-0 -space-x-1">
+          {visible.map((m) => {
+            const c = colorForMemberKey(m.key);
+            return (
+              <span
+                key={m.key}
+                className={cn(
+                  "border-card flex size-3.5 items-center justify-center rounded-full border text-[8px] font-semibold",
+                  c.barBg,
+                  c.barText,
+                )}
+                aria-label={m.name}
+              >
+                {initialFor(m.name)}
+              </span>
+            );
+          })}
+          {overflow > 0 ? (
+            <span className="border-card bg-muted text-muted-foreground flex size-3.5 items-center justify-center rounded-full border text-[8px] font-semibold">
+              +{overflow}
+            </span>
+          ) : null}
+        </span>
+      ) : (
+        <span className="border-card bg-muted text-muted-foreground flex size-3.5 shrink-0 items-center justify-center rounded-full border text-[8px]">
+          ·
+        </span>
+      )}
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate font-medium",
+          isDone && "line-through",
+        )}
+      >
+        {task.title}
+      </span>
+    </button>
+  );
+}
+
 function weekStartKey(dateKey: string): string {
   const [y, m, d] = dateKey.split("-").map(Number);
   const local = new Date(y, m - 1, d);
@@ -120,6 +222,7 @@ export default function AgendaPage() {
 
   const holidaysQuery = useHolidays(range.start, range.end);
   const oooQuery = useOooEntries(range.start, range.end);
+  const tasksQuery = useTasks();
 
   const holidayIndex = React.useMemo(
     () => buildHolidayIndex(holidaysQuery.data ?? []),
@@ -129,6 +232,19 @@ export default function AgendaPage() {
     () => buildOooIndex(oooQuery.data?.entries ?? []),
     [oooQuery.data?.entries],
   );
+  const tasksByDay = React.useMemo(
+    () => buildTasksDueIndex(tasksQuery.data?.tasks ?? []),
+    [tasksQuery.data?.tasks],
+  );
+
+  const [taskFormOpen, setTaskFormOpen] = React.useState(false);
+  const [editingTask, setEditingTask] = React.useState<Task | null>(null);
+
+  function openTaskEdit(task: Task) {
+    setEditingTask(task);
+    setTaskFormOpen(true);
+    setSelectedDateKey(null);
+  }
 
   const selectedHolidays = selectedDateKey
     ? (holidayIndex.get(selectedDateKey) ?? [])
@@ -251,7 +367,13 @@ export default function AgendaPage() {
           const key = format(date, "yyyy-MM-dd");
           const dayHolidays = holidayIndex.get(key) ?? [];
           const dayOoo = oooByDay.get(key) ?? [];
-          if (dayHolidays.length === 0 && dayOoo.length === 0) return null;
+          const dayTasks = tasksByDay.get(key) ?? [];
+          if (
+            dayHolidays.length === 0 &&
+            dayOoo.length === 0 &&
+            dayTasks.length === 0
+          )
+            return null;
 
           const rowStart = weekStartKey(key);
 
@@ -272,6 +394,10 @@ export default function AgendaPage() {
                   ))}
                 </div>
               ) : null}
+
+              {dayTasks.map((task) => (
+                <TaskDueCard key={task.id} task={task} onOpen={openTaskEdit} />
+              ))}
 
               {dayOoo.map((entry) => {
                 const color = memberColor(entry.member_name);
@@ -352,6 +478,28 @@ export default function AgendaPage() {
           onSaved={() => setCreateOpen(false)}
           onDeleted={() => setCreateOpen(false)}
           onCancel={() => setCreateOpen(false)}
+        />
+      </ResponsiveDialog>
+
+      <ResponsiveDialog
+        open={taskFormOpen}
+        onOpenChange={(open) => {
+          setTaskFormOpen(open);
+          if (!open) setEditingTask(null);
+        }}
+        title={editingTask ? "Editar tarea" : "Nueva tarea"}
+        description={
+          editingTask
+            ? "Editá los datos, comentá o eliminá."
+            : "Sumá una tarea a la lista."
+        }
+        contentClassName="sm:max-w-2xl"
+      >
+        <TaskForm
+          task={editingTask}
+          onSaved={() => setTaskFormOpen(false)}
+          onDeleted={() => setTaskFormOpen(false)}
+          onCancel={() => setTaskFormOpen(false)}
         />
       </ResponsiveDialog>
     </section>

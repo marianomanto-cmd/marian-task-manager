@@ -1,11 +1,24 @@
 "use server";
 
+import { runTaskAgent } from "@/lib/anthropic/agent";
+import { estimateCostUsd } from "@/lib/anthropic/client";
 import { batchClassify } from "@/lib/anthropic/classify";
 import type { ActionResult } from "@/lib/actions/result";
 import { createClient } from "@/lib/supabase/server";
+import { getMemberByEmail } from "@/lib/team/members";
 
 const MAX_AI_PER_RUN = 30;
 const AI_BATCH_SIZE = 10;
+
+/**
+ * Only suggested_action values that get sent through the agent loop. Newsletters
+ * and clear archive-fodder get the classifier's verdict and stop there.
+ */
+const AGENT_ELIGIBLE_ACTIONS = new Set([
+  "crear_tarea",
+  "responder",
+  "derivar",
+]);
 
 export type AnalyzeResult = {
   syncLogId: string;
@@ -16,6 +29,8 @@ export type AnalyzeResult = {
   estimatedCostUsd: number;
   failedBatches: number;
   errorSummary: string | null;
+  tasksCreated: number;
+  agentsRun: number;
 };
 
 /**
@@ -94,6 +109,8 @@ export async function analyzePendingEmailsAction(): Promise<
           estimatedCostUsd: 0,
           failedBatches: 0,
           errorSummary: null,
+          tasksCreated: 0,
+          agentsRun: 0,
         },
       };
     }
@@ -131,19 +148,63 @@ export async function analyzePendingEmailsAction(): Promise<
     }
 
     const processed = outcome.results.length;
-    const failedSummary =
+
+    // Agent stage: for emails the classifier flagged as actionable, run the
+    // create_task tool-use loop. Tasks are auto-assigned to the user who
+    // pressed the button (mapped from their auth email to a member_key).
+    const inputById = new Map(inputs.map((i) => [i.id, i]));
+    const memberKey = getMemberByEmail(user.email)?.key ?? null;
+    let agentsRun = 0;
+    let tasksCreated = 0;
+    let agentInputTokens = 0;
+    let agentOutputTokens = 0;
+    const agentErrors: string[] = [];
+
+    for (const item of outcome.results) {
+      if (!AGENT_ELIGIBLE_ACTIONS.has(item.suggested_action)) continue;
+      const emailInput = inputById.get(item.id);
+      if (!emailInput) continue;
+      agentsRun += 1;
+      const agentOutcome = await runTaskAgent({
+        email: emailInput,
+        classifierHint: {
+          summary: item.summary,
+          detectedDeadline: item.detected_deadline,
+          priorityScore: item.priority,
+        },
+        supabase,
+        userId: user.id,
+        memberKey,
+        actorEmail: user.email ?? null,
+      });
+      tasksCreated += agentOutcome.tasksCreated.length;
+      agentInputTokens += agentOutcome.inputTokens;
+      agentOutputTokens += agentOutcome.outputTokens;
+      if (agentOutcome.error) {
+        agentErrors.push(`${item.id}: ${agentOutcome.error}`);
+      }
+    }
+
+    const totalTokensInput = outcome.tokensInput + agentInputTokens;
+    const totalTokensOutput = outcome.tokensOutput + agentOutputTokens;
+    const totalCost = estimateCostUsd(totalTokensInput, totalTokensOutput);
+
+    const classifyErrors =
       outcome.failedBatches.length > 0
-        ? outcome.failedBatches.map((b) => b.error).join(" | ")
-        : null;
+        ? outcome.failedBatches.map((b) => b.error)
+        : [];
+    const combinedErrors = [...classifyErrors, ...agentErrors];
+    const failedSummary =
+      combinedErrors.length > 0 ? combinedErrors.join(" | ") : null;
 
     await supabase
       .from("sync_log")
       .update({
         finished_at: new Date().toISOString(),
         messages_processed_ai: processed,
-        total_tokens_input: outcome.tokensInput,
-        total_tokens_output: outcome.tokensOutput,
-        estimated_cost_usd: outcome.estimatedCostUsd,
+        total_tokens_input: totalTokensInput,
+        total_tokens_output: totalTokensOutput,
+        estimated_cost_usd: totalCost,
         error: failedSummary,
       })
       .eq("id", syncLogId);
@@ -154,11 +215,13 @@ export async function analyzePendingEmailsAction(): Promise<
         syncLogId,
         processed,
         pendingRemaining: Math.max((totalPending ?? rows.length) - processed, 0),
-        tokensInput: outcome.tokensInput,
-        tokensOutput: outcome.tokensOutput,
-        estimatedCostUsd: outcome.estimatedCostUsd,
+        tokensInput: totalTokensInput,
+        tokensOutput: totalTokensOutput,
+        estimatedCostUsd: totalCost,
         failedBatches: outcome.failedBatches.length,
         errorSummary: failedSummary,
+        tasksCreated,
+        agentsRun,
       },
     };
   } catch (err) {
