@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isAdminEmail, isSangriaEmail } from "@/lib/auth/admin";
 
 const PUBLIC_PATHS = ["/login", "/auth/callback"];
-const ADMIN_ONLY_PATHS = ["/inbox", "/calendar"];
+const ADMIN_ONLY_PATHS = ["/projects"];
 
 function isPathInList(path: string, list: readonly string[]): boolean {
   return list.some((p) => path === p || path.startsWith(`${p}/`));
@@ -67,8 +67,8 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    // Hide Bandeja + Calendario from non-admin team members. Direct-URL
-    // attempts get bounced to /tasks (the team's primary entry point).
+    // Projects board is admin-only (Mariano). Direct-URL attempts bounce
+    // to /tasks (the team's primary entry point).
     if (
       !isPublic &&
       !isAdminEmail(email) &&
@@ -82,7 +82,7 @@ export async function updateSession(request: NextRequest) {
     // Already signed in and visiting /login: send to the right landing.
     if (path === "/login") {
       const url = request.nextUrl.clone();
-      url.pathname = isAdminEmail(email) ? "/inbox" : "/tasks";
+      url.pathname = isAdminEmail(email) ? "/projects" : "/tasks";
       return NextResponse.redirect(url);
     }
   }

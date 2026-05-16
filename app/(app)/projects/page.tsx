@@ -1,18 +1,21 @@
-import { FolderKanban } from "lucide-react";
+import { redirect } from "next/navigation";
 
-import { PagePlaceholder } from "@/components/shell/page-placeholder";
+import { ProjectsBoard } from "@/components/projects/projects-board";
+import { isAdminEmail } from "@/lib/auth/admin";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata = {
   title: "Proyectos · Agency Board",
 };
 
-export default function ProjectsPage() {
-  return (
-    <PagePlaceholder
-      title="Proyectos"
-      description="Campañas detectadas a partir de códigos en mails entrantes."
-      icon={FolderKanban}
-      phase="Fase 4"
-    />
-  );
+export default async function ProjectsPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  // The proxy already redirects non-admins; this keeps a defensive guard.
+  const isAdmin = isAdminEmail(user.email);
+  return <ProjectsBoard canEdit={isAdmin} />;
 }

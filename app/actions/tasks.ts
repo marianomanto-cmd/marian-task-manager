@@ -3,7 +3,6 @@
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/result";
-import { notifyTaskEvent } from "@/lib/slack/notify";
 import { createClient } from "@/lib/supabase/server";
 import {
   TASK_PRIORITIES,
@@ -14,7 +13,7 @@ import {
 } from "@/lib/tasks/types";
 
 const SELECT_COLUMNS = `
-  id, user_id, project_id, email_id, title, notes, status, priority,
+  id, user_id, project_id, title, notes, status, priority,
   due_date, completed_at, created_at, updated_at, link,
   assignees:task_assignees(member_key),
   notified:task_notified(member_key)
@@ -178,12 +177,10 @@ async function fetchTaskById(
 async function setAssigneesAndLog(
   supabase: SupabaseServerClient,
   taskId: string,
-  taskTitle: string,
   nextKeys: string[],
   currentKeys: string[],
   actorUserId: string,
   actorEmail: string | null,
-  options: { notifyAssigned?: boolean } = {},
 ): Promise<{ added: string[]; removed: string[] }> {
   const currentSet = new Set(currentKeys);
   const nextSet = new Set(nextKeys);
@@ -207,15 +204,6 @@ async function setAssigneesAndLog(
         action: "assigned",
         payload: { member_key },
       });
-      if (options.notifyAssigned) {
-        await notifyTaskEvent({
-          kind: "assigned",
-          taskId,
-          title: taskTitle,
-          newAssigneeKey: member_key,
-          actorEmail,
-        });
-      }
     }
   }
 
@@ -240,21 +228,12 @@ async function setAssigneesAndLog(
   return { added: toAdd, removed: toRemove };
 }
 
-/**
- * Diffs the task's "notified" set and persists it. Notified people are kept
- * in the loop but don't own the task — we don't write task_activity rows for
- * them (the feed tracks ownership), only Slack DMs for newly added ones when
- * `options.notify` is set.
- */
 async function setNotifiedMembers(
   supabase: SupabaseServerClient,
   taskId: string,
-  taskTitle: string,
   nextKeys: string[],
   currentKeys: string[],
   actorUserId: string,
-  actorEmail: string | null,
-  options: { notify?: boolean } = {},
 ): Promise<void> {
   const currentSet = new Set(currentKeys);
   const nextSet = new Set(nextKeys);
@@ -270,17 +249,6 @@ async function setNotifiedMembers(
       })),
     );
     if (error) throw new Error(error.message);
-    if (options.notify) {
-      for (const member_key of toAdd) {
-        await notifyTaskEvent({
-          kind: "notified",
-          taskId,
-          title: taskTitle,
-          newNotifiedKey: member_key,
-          actorEmail,
-        });
-      }
-    }
   }
 
   if (toRemove.length > 0) {
@@ -384,14 +352,10 @@ export async function createTaskAction(
 
     const taskId = insertRow.id as string;
 
-    // Persist initial assignees (if any) and log them. We skip the per-key
-    // "assigned" Slack DM on create — we send a single combined "created"
-    // notification below to avoid spamming.
     if (parsed.data.assignee_keys.length > 0) {
       await setAssigneesAndLog(
         supabase,
         taskId,
-        parsed.data.title,
         parsed.data.assignee_keys,
         [],
         auth.userId,
@@ -399,17 +363,13 @@ export async function createTaskAction(
       );
     }
 
-    // Persist initial notified members. No per-key DM — the combined
-    // "created" notification below covers them too.
     if (parsed.data.notified_keys.length > 0) {
       await setNotifiedMembers(
         supabase,
         taskId,
-        parsed.data.title,
         parsed.data.notified_keys,
         [],
         auth.userId,
-        auth.email,
       );
     }
 
@@ -419,15 +379,6 @@ export async function createTaskAction(
       actorEmail: auth.email,
       action: "created",
       payload: { title: parsed.data.title },
-    });
-
-    await notifyTaskEvent({
-      kind: "created",
-      taskId,
-      title: parsed.data.title,
-      assigneeKeys: parsed.data.assignee_keys,
-      notifiedKeys: parsed.data.notified_keys,
-      actorEmail: auth.email,
     });
 
     const refreshed = await fetchTaskById(supabase, taskId);
@@ -527,12 +478,10 @@ export async function updateTaskAction(
       await setAssigneesAndLog(
         supabase,
         parsed.data.id,
-        current.title as string,
         parsed.data.assignee_keys,
         currentKeys,
         auth.userId,
         auth.email,
-        { notifyAssigned: true },
       );
     }
 
@@ -540,12 +489,9 @@ export async function updateTaskAction(
       await setNotifiedMembers(
         supabase,
         parsed.data.id,
-        current.title as string,
         parsed.data.notified_keys,
         currentNotifiedKeys,
         auth.userId,
-        auth.email,
-        { notify: true },
       );
     }
 
@@ -558,7 +504,6 @@ export async function updateTaskAction(
         payload: statusChange,
       });
     }
-    // Only log generic 'updated' for non-status field changes.
     const nonStatusFields = changedFields.filter((f) => f !== "status");
     if (nonStatusFields.length > 0) {
       await logActivity(supabase, {
@@ -567,40 +512,6 @@ export async function updateTaskAction(
         actorEmail: auth.email,
         action: "updated",
         payload: { fields: nonStatusFields },
-      });
-    }
-
-    // Slack: announce status change + field edits using the member sets we
-    // just wrote (i.e. the new keys).
-    const finalKeys =
-      parsed.data.assignee_keys !== undefined
-        ? parsed.data.assignee_keys
-        : currentKeys;
-    const finalNotifiedKeys =
-      parsed.data.notified_keys !== undefined
-        ? parsed.data.notified_keys
-        : currentNotifiedKeys;
-    if (statusChange) {
-      await notifyTaskEvent({
-        kind: "status_changed",
-        taskId: parsed.data.id,
-        title: current.title as string,
-        assigneeKeys: finalKeys,
-        notifiedKeys: finalNotifiedKeys,
-        from: statusChange.from,
-        to: statusChange.to,
-        actorEmail: auth.email,
-      });
-    }
-    if (nonStatusFields.length > 0) {
-      await notifyTaskEvent({
-        kind: "updated",
-        taskId: parsed.data.id,
-        title: current.title as string,
-        assigneeKeys: finalKeys,
-        notifiedKeys: finalNotifiedKeys,
-        fields: nonStatusFields,
-        actorEmail: auth.email,
       });
     }
 
@@ -652,17 +563,6 @@ export async function toggleTaskDoneAction(
       payload: { from: current.status as TaskStatus, to: nextStatus },
     });
 
-    await notifyTaskEvent({
-      kind: "status_changed",
-      taskId: parsed.data,
-      title: current.title as string,
-      assigneeKeys: memberKeysFrom(current.assignees),
-      notifiedKeys: memberKeysFrom(current.notified),
-      from: current.status as TaskStatus,
-      to: nextStatus,
-      actorEmail: auth.email,
-    });
-
     const refreshed = await fetchTaskById(supabase, parsed.data);
     if (!refreshed) throw new Error("No se pudo releer la tarea.");
     return { ok: true, data: refreshed };
@@ -710,103 +610,3 @@ export async function deleteTaskAction(
   }
 }
 
-function aiToTaskPriority(score: number | null | undefined): TaskPriority {
-  if (typeof score !== "number") return "medium";
-  if (score >= 70) return "high";
-  if (score < 30) return "low";
-  return "medium";
-}
-
-function deadlineToDueDate(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1] : null;
-}
-
-function truncateTitle(s: string, max = 200): string {
-  if (s.length <= max) return s.trim();
-  const slice = s.slice(0, max);
-  const lastDot = slice.lastIndexOf(". ");
-  if (lastDot > max * 0.4) return `${slice.slice(0, lastDot + 1).trim()}`;
-  return `${slice.trim()}…`;
-}
-
-export async function convertEmailToTaskAction(
-  emailId: string,
-): Promise<ActionResult<Task>> {
-  const idSchema = z.string().uuid();
-  const parsed = idSchema.safeParse(emailId);
-  if (!parsed.success) return asInvalid(parsed.error.message);
-
-  const auth = await requireUser();
-  if (!auth.ok) return auth.result;
-
-  try {
-    const supabase = await createClient();
-    const { data: email, error: emailErr } = await supabase
-      .from("emails")
-      .select(
-        "id, subject, snippet, body_preview, ai:email_ai(summary, priority, detected_deadline, suggested_action)",
-      )
-      .eq("id", parsed.data)
-      .eq("user_id", auth.userId)
-      .single();
-    if (emailErr) throw new Error(emailErr.message);
-    if (!email) throw new Error("Mail no encontrado.");
-
-    const aiField = email.ai;
-    const ai = Array.isArray(aiField)
-      ? (aiField[0] as {
-          summary: string | null;
-          priority: number | null;
-          detected_deadline: string | null;
-        } | undefined)
-      : (aiField as
-          | {
-              summary: string | null;
-              priority: number | null;
-              detected_deadline: string | null;
-            }
-          | null
-          | undefined);
-
-    const title = truncateTitle(
-      (ai?.summary && ai.summary.length > 0
-        ? ai.summary
-        : email.subject) ?? "(sin asunto)",
-    );
-    const priority = aiToTaskPriority(ai?.priority);
-    const due_date = deadlineToDueDate(ai?.detected_deadline);
-    const notes =
-      (email.snippet ?? email.body_preview ?? "").slice(0, 1000) || null;
-
-    const { data: created, error: insertErr } = await supabase
-      .from("tasks")
-      .insert({
-        user_id: auth.userId,
-        email_id: email.id,
-        title,
-        notes,
-        status: "todo",
-        priority,
-        due_date,
-      })
-      .select("id")
-      .single();
-    if (insertErr) throw new Error(insertErr.message);
-
-    await logActivity(supabase, {
-      taskId: created.id,
-      actorUserId: auth.userId,
-      actorEmail: auth.email,
-      action: "created",
-      payload: { title, source: "email", email_id: email.id },
-    });
-
-    const refreshed = await fetchTaskById(supabase, created.id);
-    if (!refreshed) throw new Error("No se pudo releer la tarea.");
-    return { ok: true, data: refreshed };
-  } catch (err) {
-    return asUnknown(err);
-  }
-}

@@ -5,7 +5,6 @@ export type Task = {
   id: string;
   user_id: string;
   project_id: string | null;
-  email_id: string | null;
   title: string;
   notes: string | null;
   status: TaskStatus;

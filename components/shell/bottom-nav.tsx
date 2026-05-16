@@ -10,7 +10,7 @@ export function BottomNav({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
   const items = visibleNavItems(isAdmin);
   // Tailwind needs the explicit class name for the dynamic column count.
-  const gridCols = items.length === 5 ? "grid-cols-5" : "grid-cols-3";
+  const gridCols = items.length === 2 ? "grid-cols-2" : "grid-cols-1";
 
   return (
     <nav
