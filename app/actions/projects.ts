@@ -5,17 +5,20 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/actions/result";
 import { isAdminEmail } from "@/lib/auth/admin";
 import {
+  PROJECT_COLORS,
   PROJECT_ITEM_CATEGORIES,
   PROJECT_ITEM_STATUSES,
+  type ProjectColor,
   type ProjectItem,
   type ProjectItemCategory,
   type ProjectItemStatus,
+  type ProjectMeta,
 } from "@/lib/projects/types";
 import { createClient } from "@/lib/supabase/server";
 
 const SELECT_COLUMNS = `
-  id, user_id, project, title, category, status,
-  due_date, link, position, created_at, updated_at
+  id, user_id, project, title, description, category, status,
+  due_date, link, position, archived_at, created_at, updated_at
 `;
 
 const categorySchema = z.enum(
@@ -27,12 +30,22 @@ const categorySchema = z.enum(
 const statusSchema = z.enum(
   PROJECT_ITEM_STATUSES as readonly [ProjectItemStatus, ...ProjectItemStatus[]],
 );
+const colorSchema = z.enum(
+  PROJECT_COLORS as readonly [ProjectColor, ...ProjectColor[]],
+);
 const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha en formato YYYY-MM-DD");
 const linkSchema = z.string().trim().max(2000);
 const projectSchema = z.string().trim().min(1, "Falta el proyecto").max(120);
 const titleSchema = z.string().trim().min(1, "Falta la tarea").max(500);
+const descriptionSchema = z.string().trim().max(4000);
+
+const archiveModeSchema = z.enum(["active", "archive"]).default("active");
+
+const listSchema = z.object({
+  archiveMode: archiveModeSchema.optional(),
+});
 
 const createSchema = z.object({
   project: projectSchema,
@@ -41,12 +54,14 @@ const createSchema = z.object({
   status: statusSchema.default("pending"),
   due_date: dateSchema.optional().nullable(),
   link: linkSchema.optional().nullable(),
+  description: descriptionSchema.optional().nullable(),
 });
 
 const updateSchema = z.object({
   id: z.string().uuid(),
   project: projectSchema.optional(),
   title: titleSchema.optional(),
+  description: descriptionSchema.optional().nullable(),
   category: categorySchema.optional(),
   status: statusSchema.optional(),
   due_date: dateSchema.optional().nullable(),
@@ -58,6 +73,22 @@ const renameProjectSchema = z.object({
   to: projectSchema,
 });
 
+const reorderItemsSchema = z.object({
+  project: projectSchema,
+  ids: z.array(z.string().uuid()).max(500),
+});
+
+const reorderProjectsSchema = z.object({
+  projects: z.array(projectSchema).max(200),
+});
+
+const metaUpdateSchema = z.object({
+  project: projectSchema,
+  color: colorSchema.optional(),
+  emoji: z.string().trim().max(8).nullable().optional(),
+});
+
+export type ListProjectItemsInput = z.infer<typeof listSchema>;
 export type CreateProjectItemInput = z.infer<typeof createSchema>;
 export type UpdateProjectItemInput = z.infer<typeof updateSchema>;
 
@@ -125,22 +156,55 @@ function asUnknown(err: unknown): ActionResult<never> {
   };
 }
 
-export async function listProjectItemsAction(): Promise<
-  ActionResult<ProjectItem[]>
-> {
+export type ProjectBoardData = {
+  items: ProjectItem[];
+  meta: ProjectMeta[];
+};
+
+export async function listProjectBoardAction(
+  input: ListProjectItemsInput = {},
+): Promise<ActionResult<ProjectBoardData>> {
+  const parsed = listSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
   const auth = await requireReader();
   if (!auth.ok) return auth.result;
 
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase
+    let itemsQuery = supabase
       .from("project_items")
       .select(SELECT_COLUMNS)
       .order("project", { ascending: true })
       .order("position", { ascending: true })
       .order("created_at", { ascending: true });
-    if (error) throw new Error(error.message);
-    return { ok: true, data: (data ?? []) as ProjectItem[] };
+
+    const archiveMode = parsed.data.archiveMode ?? "active";
+    if (archiveMode === "active") {
+      itemsQuery = itemsQuery.is("archived_at", null);
+    } else {
+      itemsQuery = itemsQuery.not("archived_at", "is", null);
+    }
+
+    const [itemsRes, metaRes] = await Promise.all([
+      itemsQuery,
+      supabase
+        .from("projects_meta")
+        .select("project, color, emoji, position")
+        .order("position", { ascending: true })
+        .order("project", { ascending: true }),
+    ]);
+
+    if (itemsRes.error) throw new Error(itemsRes.error.message);
+    if (metaRes.error) throw new Error(metaRes.error.message);
+
+    return {
+      ok: true,
+      data: {
+        items: (itemsRes.data ?? []) as ProjectItem[],
+        meta: (metaRes.data ?? []) as ProjectMeta[],
+      },
+    };
   } catch (err) {
     return asUnknown(err);
   }
@@ -157,7 +221,6 @@ export async function createProjectItemAction(
 
   try {
     const supabase = await createClient();
-    // Append to the end of its project group.
     const { data: maxRow } = await supabase
       .from("project_items")
       .select("position")
@@ -174,6 +237,9 @@ export async function createProjectItemAction(
         user_id: auth.userId,
         project: parsed.data.project,
         title: parsed.data.title,
+        description: parsed.data.description?.length
+          ? parsed.data.description
+          : null,
         category: parsed.data.category,
         status: parsed.data.status,
         due_date: parsed.data.due_date ?? null,
@@ -203,6 +269,10 @@ export async function updateProjectItemAction(
     const patch: Record<string, unknown> = {};
     if (parsed.data.project !== undefined) patch.project = parsed.data.project;
     if (parsed.data.title !== undefined) patch.title = parsed.data.title;
+    if (parsed.data.description !== undefined)
+      patch.description = parsed.data.description?.length
+        ? parsed.data.description
+        : null;
     if (parsed.data.category !== undefined) patch.category = parsed.data.category;
     if (parsed.data.status !== undefined) patch.status = parsed.data.status;
     if (parsed.data.due_date !== undefined)
@@ -214,6 +284,32 @@ export async function updateProjectItemAction(
       .from("project_items")
       .update(patch)
       .eq("id", parsed.data.id)
+      .eq("user_id", auth.userId)
+      .select(SELECT_COLUMNS)
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, data: data as ProjectItem };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function archiveProjectItemAction(
+  id: string,
+  archive: boolean,
+): Promise<ActionResult<ProjectItem>> {
+  const parsed = z.string().uuid().safeParse(id);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("project_items")
+      .update({ archived_at: archive ? new Date().toISOString() : null })
+      .eq("id", parsed.data)
       .eq("user_id", auth.userId)
       .select(SELECT_COLUMNS)
       .single();
@@ -265,6 +361,13 @@ export async function renameProjectAction(
       .eq("project", parsed.data.from)
       .select("id");
     if (error) throw new Error(error.message);
+
+    await supabase
+      .from("projects_meta")
+      .update({ project: parsed.data.to })
+      .eq("user_id", auth.userId)
+      .eq("project", parsed.data.from);
+
     return {
       ok: true,
       data: {
@@ -296,10 +399,172 @@ export async function deleteProjectAction(
       .eq("project", parsed.data)
       .select("id");
     if (error) throw new Error(error.message);
+
+    await supabase
+      .from("projects_meta")
+      .delete()
+      .eq("user_id", auth.userId)
+      .eq("project", parsed.data);
+
     return {
       ok: true,
       data: { project: parsed.data, count: (data ?? []).length },
     };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function reorderProjectItemsAction(
+  input: unknown,
+): Promise<ActionResult<{ count: number }>> {
+  const parsed = reorderItemsSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    await Promise.all(
+      parsed.data.ids.map((id, idx) =>
+        supabase
+          .from("project_items")
+          .update({ position: idx })
+          .eq("id", id)
+          .eq("user_id", auth.userId)
+          .eq("project", parsed.data.project),
+      ),
+    );
+    return { ok: true, data: { count: parsed.data.ids.length } };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function reorderProjectsAction(
+  input: unknown,
+): Promise<ActionResult<{ count: number }>> {
+  const parsed = reorderProjectsSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    await Promise.all(
+      parsed.data.projects.map((project, idx) =>
+        supabase
+          .from("projects_meta")
+          .upsert(
+            { user_id: auth.userId, project, position: idx },
+            { onConflict: "user_id,project" },
+          ),
+      ),
+    );
+    return { ok: true, data: { count: parsed.data.projects.length } };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function updateProjectMetaAction(
+  input: unknown,
+): Promise<ActionResult<ProjectMeta>> {
+  const parsed = metaUpdateSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const patch: Record<string, unknown> = {
+      user_id: auth.userId,
+      project: parsed.data.project,
+    };
+    if (parsed.data.color !== undefined) patch.color = parsed.data.color;
+    if (parsed.data.emoji !== undefined)
+      patch.emoji = parsed.data.emoji?.length ? parsed.data.emoji : null;
+
+    const { data, error } = await supabase
+      .from("projects_meta")
+      .upsert(patch, { onConflict: "user_id,project" })
+      .select("project, color, emoji, position")
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, data: data as ProjectMeta };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export type ShareTokenResult = { token: string | null };
+
+export async function getShareTokenAction(): Promise<
+  ActionResult<ShareTokenResult>
+> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("user_settings")
+      .select("projects_share_token")
+      .eq("user_id", auth.userId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return {
+      ok: true,
+      data: {
+        token: (data?.projects_share_token as string | null) ?? null,
+      },
+    };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function rotateShareTokenAction(): Promise<
+  ActionResult<ShareTokenResult>
+> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const token = crypto.randomUUID();
+    const { error } = await supabase
+      .from("user_settings")
+      .upsert(
+        { user_id: auth.userId, projects_share_token: token },
+        { onConflict: "user_id" },
+      );
+    if (error) throw new Error(error.message);
+    return { ok: true, data: { token } };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function revokeShareTokenAction(): Promise<
+  ActionResult<ShareTokenResult>
+> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from("user_settings")
+      .upsert(
+        { user_id: auth.userId, projects_share_token: null },
+        { onConflict: "user_id" },
+      );
+    if (error) throw new Error(error.message);
+    return { ok: true, data: { token: null } };
   } catch (err) {
     return asUnknown(err);
   }

@@ -40,7 +40,9 @@ export default async function AppLayout({
       />
       <div className="flex flex-1">
         <Sidebar isAdmin={isAdmin} />
-        <main className="flex-1 pb-16 md:pb-0">{children}</main>
+        <main className={isAdmin ? "flex-1 pb-16 md:pb-0" : "flex-1"}>
+          {children}
+        </main>
       </div>
       <BottomNav isAdmin={isAdmin} />
     </div>
