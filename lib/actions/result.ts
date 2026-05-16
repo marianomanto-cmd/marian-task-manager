@@ -7,6 +7,11 @@ export type ActionResult<T> =
   | { ok: true; data: T }
   | {
       ok: false;
-      code: "auth_required" | "invalid_input" | "rate_limited" | "unknown";
+      code:
+        | "auth_required"
+        | "forbidden"
+        | "invalid_input"
+        | "rate_limited"
+        | "unknown";
       message: string;
     };

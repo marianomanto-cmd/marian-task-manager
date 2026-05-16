@@ -22,12 +22,7 @@ export function LoginButton() {
       provider: "google",
       options: {
         redirectTo,
-        scopes:
-          "openid email profile https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar.events",
-        queryParams: {
-          access_type: "offline",
-          prompt: "consent",
-        },
+        scopes: "openid email profile",
       },
     });
 

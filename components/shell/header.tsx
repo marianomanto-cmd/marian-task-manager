@@ -1,6 +1,5 @@
 import Link from "next/link";
 
-import { MeetingAlertBanner } from "@/components/calendar/meeting-alert-banner";
 import { ActivityTrigger } from "@/components/shell/activity-trigger";
 import { TimezoneClocks } from "@/components/shell/timezone-clocks";
 import { UserMenu } from "@/components/shell/user-menu";
@@ -16,7 +15,7 @@ type HeaderProps = {
 };
 
 export function Header({ isAdmin, user }: HeaderProps) {
-  const homeHref = isAdmin ? "/inbox" : "/tasks";
+  const homeHref = isAdmin ? "/projects" : "/tasks";
 
   return (
     <header className="bg-background/95 supports-[backdrop-filter]:bg-background/70 sticky top-0 z-40 border-b backdrop-blur">
@@ -42,7 +41,6 @@ export function Header({ isAdmin, user }: HeaderProps) {
       <div className="border-t md:hidden">
         <TimezoneClocks variant="compact" className="px-4 py-1.5" />
       </div>
-      {isAdmin ? <MeetingAlertBanner /> : null}
     </header>
   );
 }

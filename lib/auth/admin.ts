@@ -1,10 +1,6 @@
 /**
- * Admin = Mariano. The user whose Gmail + Calendar tabs are visible.
- * Configured via ADMIN_EMAIL env var so the email isn't hardcoded in source.
- *
- * If ADMIN_EMAIL is unset, no one is treated as admin — fail closed.
- * Set it in Vercel → Project Settings → Environment Variables (and locally
- * in .env.local).
+ * Admin = Mariano. Owns the personal Projects board.
+ * Configured via ADMIN_EMAIL env var; unset means no one is admin.
  */
 export function isAdminEmail(email: string | null | undefined): boolean {
   const admin = process.env.ADMIN_EMAIL;
