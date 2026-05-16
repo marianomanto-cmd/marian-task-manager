@@ -1,18 +1,38 @@
 "use client";
 
+/* eslint-disable react-hooks/refs -- @dnd-kit's useSortable returns ref-like
+   values that the React 19 refs rule flags as "during render"; this is the
+   library's documented usage and runs correctly. */
+
 import * as React from "react";
-import { format, isToday, isTomorrow, parseISO } from "date-fns";
-import { es } from "date-fns/locale";
 import {
+  addDays,
+  addWeeks,
+  format,
+  isPast,
+  isToday,
+  isTomorrow,
+  nextMonday,
+  parseISO,
+  startOfDay,
+} from "date-fns";
+import { es } from "date-fns/locale";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  Archive,
+  ArchiveRestore,
   CalendarDays,
   Check,
   ExternalLink,
+  GripVertical,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
+  archiveProjectItemAction,
   deleteProjectItemAction,
   updateProjectItemAction,
 } from "@/app/actions/projects";
@@ -22,7 +42,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -32,27 +51,64 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Textarea } from "@/components/ui/textarea";
 import { showToast } from "@/components/ui/toast";
 import {
   PROJECT_ITEM_CATEGORIES,
   PROJECT_ITEM_CATEGORY_CLASS,
   PROJECT_ITEM_CATEGORY_LABEL,
   PROJECT_ITEM_STATUSES,
+  PROJECT_ITEM_STATUS_BAR,
   PROJECT_ITEM_STATUS_CLASS,
   PROJECT_ITEM_STATUS_DOT,
   PROJECT_ITEM_STATUS_LABEL,
+  type DensityMode,
   type ProjectItem,
   type ProjectItemCategory,
   type ProjectItemStatus,
 } from "@/lib/projects/types";
 import { cn } from "@/lib/utils";
 
-export function ProjectItemRow({ item }: { item: ProjectItem }) {
+type RowProps = {
+  item: ProjectItem;
+  density: DensityMode;
+  canEdit: boolean;
+  draggable?: boolean;
+};
+
+export function ProjectItemRow({
+  item,
+  density,
+  canEdit,
+  draggable = true,
+}: RowProps) {
+  const sortable = useSortable({
+    id: item.id,
+    disabled: !canEdit || !draggable,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(sortable.transform),
+    transition: sortable.transition,
+    opacity: sortable.isDragging ? 0.4 : 1,
+  };
+
   const qc = useQueryClient();
+  const isDone = item.status === "done";
+  const isArchived = item.archived_at !== null;
 
   const updateMutation = useMutation({
     mutationFn: async (patch: Partial<ProjectItem>) => {
       const result = await updateProjectItemAction({ id: item.id, ...patch });
+      if (!result.ok) throw new Error(result.message);
+      return result.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY }),
+    onError: (err: Error) => showToast({ title: err.message }),
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: async (archive: boolean) => {
+      const result = await archiveProjectItemAction(item.id, archive);
       if (!result.ok) throw new Error(result.message);
       return result.data;
     },
@@ -69,64 +125,162 @@ export function ProjectItemRow({ item }: { item: ProjectItem }) {
     onError: (err: Error) => showToast({ title: err.message }),
   });
 
-  const isDone = item.status === "done";
+  const padY = density === "compact" ? "py-1.5" : "py-2.5";
 
   return (
     <div
+      ref={sortable.setNodeRef}
+      style={style}
       className={cn(
-        "group grid grid-cols-[1fr_120px_120px_120px_44px] items-center gap-3 border-b px-3 py-2.5 transition-colors hover:bg-muted/40 md:grid-cols-[1fr_140px_140px_140px_44px]",
+        "group relative border-b last:border-b-0 transition-colors",
+        sortable.isOver && "bg-accent/30",
         isDone && "text-muted-foreground",
       )}
     >
-      <TitleCell
-        value={item.title}
-        link={item.link}
-        done={isDone}
-        onSave={(title) => updateMutation.mutate({ title })}
-        onLink={(link) => updateMutation.mutate({ link })}
+      <span
+        aria-hidden
+        className={cn(
+          "absolute inset-y-0 left-0 w-[3px]",
+          PROJECT_ITEM_STATUS_BAR[item.status],
+        )}
       />
-      <CategoryCell
-        value={item.category}
-        onChange={(category) => updateMutation.mutate({ category })}
-      />
-      <StatusCell
-        value={item.status}
-        onChange={(status) => updateMutation.mutate({ status })}
-      />
-      <DueDateCell
-        value={item.due_date}
-        onChange={(due_date) => updateMutation.mutate({ due_date })}
-      />
-      <RowMenu
-        item={item}
-        onDelete={() => deleteMutation.mutate()}
-        onToggleDone={() =>
-          updateMutation.mutate({ status: isDone ? "pending" : "done" })
-        }
-      />
+
+      {/* Desktop layout */}
+      <div
+        className={cn(
+          "hidden gap-3 pl-4 pr-2 md:grid md:items-center",
+          padY,
+          density === "compact"
+            ? "md:grid-cols-[16px_1fr_110px_120px_120px_36px]"
+            : "md:grid-cols-[16px_1fr_130px_130px_130px_36px]",
+        )}
+      >
+        {canEdit && draggable ? (
+          <button
+            type="button"
+            {...sortable.attributes}
+            {...sortable.listeners}
+            className="text-muted-foreground/40 hover:text-foreground flex h-6 cursor-grab items-center justify-center active:cursor-grabbing"
+            aria-label="Arrastrar"
+          >
+            <GripVertical className="size-3.5" />
+          </button>
+        ) : (
+          <span />
+        )}
+
+        <TitleCell
+          value={item.title}
+          description={item.description}
+          link={item.link}
+          done={isDone}
+          canEdit={canEdit}
+          onSave={(title) => updateMutation.mutate({ title })}
+          onSaveDesc={(description) => updateMutation.mutate({ description })}
+          onSaveLink={(link) => updateMutation.mutate({ link })}
+        />
+        <CategoryCell
+          value={item.category}
+          canEdit={canEdit}
+          onChange={(category) => updateMutation.mutate({ category })}
+        />
+        <StatusCell
+          value={item.status}
+          canEdit={canEdit}
+          onChange={(status) => updateMutation.mutate({ status })}
+        />
+        <DueDateCell
+          value={item.due_date}
+          canEdit={canEdit}
+          onChange={(due_date) => updateMutation.mutate({ due_date })}
+        />
+        <RowMenu
+          canEdit={canEdit}
+          isArchived={isArchived}
+          onArchive={() => archiveMutation.mutate(!isArchived)}
+          onDelete={() => deleteMutation.mutate()}
+          onToggleDone={() =>
+            updateMutation.mutate({ status: isDone ? "pending" : "done" })
+          }
+        />
+      </div>
+
+      {/* Mobile card layout */}
+      <div className="flex flex-col gap-2 pl-3 pr-2 py-3 md:hidden">
+        <div className="flex items-start gap-2">
+          <TitleCell
+            value={item.title}
+            description={item.description}
+            link={item.link}
+            done={isDone}
+            canEdit={canEdit}
+            mobile
+            onSave={(title) => updateMutation.mutate({ title })}
+            onSaveDesc={(description) => updateMutation.mutate({ description })}
+            onSaveLink={(link) => updateMutation.mutate({ link })}
+          />
+          <RowMenu
+            canEdit={canEdit}
+            isArchived={isArchived}
+            onArchive={() => archiveMutation.mutate(!isArchived)}
+            onDelete={() => deleteMutation.mutate()}
+            onToggleDone={() =>
+              updateMutation.mutate({ status: isDone ? "pending" : "done" })
+            }
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <StatusCell
+            value={item.status}
+            canEdit={canEdit}
+            onChange={(status) => updateMutation.mutate({ status })}
+          />
+          <CategoryCell
+            value={item.category}
+            canEdit={canEdit}
+            onChange={(category) => updateMutation.mutate({ category })}
+          />
+          <DueDateCell
+            value={item.due_date}
+            canEdit={canEdit}
+            onChange={(due_date) => updateMutation.mutate({ due_date })}
+          />
+        </div>
+      </div>
     </div>
   );
 }
 
 function TitleCell({
   value,
+  description,
   link,
   done,
+  canEdit,
+  mobile = false,
   onSave,
-  onLink,
+  onSaveDesc,
+  onSaveLink,
 }: {
   value: string;
+  description: string | null;
   link: string | null;
   done: boolean;
+  canEdit: boolean;
+  mobile?: boolean;
   onSave: (next: string) => void;
-  onLink: (next: string | null) => void;
+  onSaveDesc: (next: string | null) => void;
+  onSaveLink: (next: string | null) => void;
 }) {
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState(value);
   const [linkOpen, setLinkOpen] = React.useState(false);
   const [linkDraft, setLinkDraft] = React.useState(link ?? "");
+  const [descOpen, setDescOpen] = React.useState(false);
+  const [descDraft, setDescDraft] = React.useState(description ?? "");
 
   function beginEdit() {
+    if (!canEdit) return;
     setDraft(value);
     setEditing(true);
   }
@@ -134,6 +288,11 @@ function TitleCell({
   function openLink(next: boolean) {
     if (next) setLinkDraft(link ?? "");
     setLinkOpen(next);
+  }
+
+  function openDesc(next: boolean) {
+    if (next) setDescDraft(description ?? "");
+    setDescOpen(next);
   }
 
   function commit() {
@@ -147,11 +306,20 @@ function TitleCell({
     setLinkOpen(false);
     const trimmed = linkDraft.trim();
     const next = trimmed.length > 0 ? trimmed : null;
-    if (next !== (link ?? null)) onLink(next);
+    if (next !== (link ?? null)) onSaveLink(next);
+  }
+
+  function saveDesc() {
+    setDescOpen(false);
+    const trimmed = descDraft.trim();
+    const next = trimmed.length > 0 ? trimmed : null;
+    if (next !== (description ?? null)) onSaveDesc(next);
   }
 
   return (
-    <div className="flex min-w-0 items-center gap-2">
+    <div
+      className={cn("flex min-w-0 items-center gap-1.5", mobile && "flex-1")}
+    >
       {editing ? (
         <Input
           autoFocus
@@ -170,18 +338,78 @@ function TitleCell({
           className="h-8 text-sm"
         />
       ) : (
-        <button
-          type="button"
-          onClick={beginEdit}
-          className={cn(
-            "truncate text-left text-sm",
-            done && "line-through",
-          )}
-          title={value}
-        >
-          {value}
-        </button>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <button
+            type="button"
+            onClick={beginEdit}
+            disabled={!canEdit}
+            className={cn(
+              "truncate text-left text-sm font-medium",
+              done && "line-through opacity-70",
+              !canEdit && "cursor-default",
+              mobile && "whitespace-normal text-[15px] leading-snug",
+            )}
+            title={value}
+          >
+            {value}
+          </button>
+          {description && !mobile ? (
+            <p className="text-muted-foreground truncate text-[11px]">
+              {description}
+            </p>
+          ) : null}
+          {description && mobile ? (
+            <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">
+              {description}
+            </p>
+          ) : null}
+        </div>
       )}
+
+      <Popover open={descOpen} onOpenChange={openDesc}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className={cn(
+              "size-7 shrink-0",
+              description
+                ? "text-foreground/60"
+                : "text-muted-foreground/40 opacity-0 group-hover:opacity-100",
+              !canEdit && !description && "hidden",
+            )}
+            aria-label={description ? "Editar nota" : "Agregar nota"}
+            disabled={!canEdit && !description}
+          >
+            <span className="inline-flex size-3.5 items-center justify-center text-[11px] font-bold">
+              i
+            </span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-80 space-y-2" align="start">
+          <div className="text-xs font-medium">Nota / contexto</div>
+          {canEdit ? (
+            <>
+              <Textarea
+                value={descDraft}
+                onChange={(e) => setDescDraft(e.target.value)}
+                placeholder="Información extra que querés que vea el cliente…"
+                rows={4}
+                className="text-sm"
+              />
+              <div className="flex justify-end">
+                <Button type="button" size="sm" onClick={saveDesc}>
+                  Guardar
+                </Button>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm whitespace-pre-wrap">{description}</p>
+          )}
+        </PopoverContent>
+      </Popover>
+
       <Popover open={linkOpen} onOpenChange={openLink}>
         <PopoverTrigger asChild>
           <Button
@@ -193,42 +421,60 @@ function TitleCell({
               link
                 ? "text-sky-600 dark:text-sky-300"
                 : "text-muted-foreground/40 opacity-0 group-hover:opacity-100",
+              !canEdit && !link && "hidden",
             )}
-            aria-label={link ? "Editar link" : "Agregar link"}
+            aria-label={link ? "Abrir link" : "Agregar link"}
+            disabled={!canEdit && !link}
           >
             <ExternalLink className="size-3.5" />
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-72 space-y-2" align="start">
           <div className="text-xs font-medium">Link asociado</div>
-          <Input
-            placeholder="https://…"
-            value={linkDraft}
-            onChange={(e) => setLinkDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                saveLink();
-              }
-            }}
-          />
-          <div className="flex items-center justify-between gap-2">
-            {link ? (
-              <a
-                href={link}
-                target="_blank"
-                rel="noreferrer"
-                className="truncate text-xs text-sky-600 underline dark:text-sky-300"
-              >
-                Abrir actual ↗
-              </a>
-            ) : (
-              <span />
-            )}
-            <Button type="button" size="sm" onClick={saveLink}>
-              Guardar
-            </Button>
-          </div>
+          {link ? (
+            <a
+              href={link}
+              target="_blank"
+              rel="noreferrer"
+              className="block truncate text-xs text-sky-600 underline dark:text-sky-300"
+            >
+              {link} ↗
+            </a>
+          ) : null}
+          {canEdit ? (
+            <>
+              <Input
+                placeholder="https://…"
+                value={linkDraft}
+                onChange={(e) => setLinkDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    saveLink();
+                  }
+                }}
+              />
+              <div className="flex justify-end gap-2">
+                {link ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setLinkDraft("");
+                      onSaveLink(null);
+                      setLinkOpen(false);
+                    }}
+                  >
+                    Quitar
+                  </Button>
+                ) : null}
+                <Button type="button" size="sm" onClick={saveLink}>
+                  Guardar
+                </Button>
+              </div>
+            </>
+          ) : null}
         </PopoverContent>
       </Popover>
     </div>
@@ -237,22 +483,31 @@ function TitleCell({
 
 function CategoryCell({
   value,
+  canEdit,
   onChange,
 }: {
   value: ProjectItemCategory;
+  canEdit: boolean;
   onChange: (next: ProjectItemCategory) => void;
 }) {
+  const chip = (
+    <span
+      className={cn(
+        "inline-flex h-6 items-center justify-center rounded-full border px-2 text-[10px] font-semibold uppercase tracking-wide",
+        PROJECT_ITEM_CATEGORY_CLASS[value],
+      )}
+    >
+      {PROJECT_ITEM_CATEGORY_LABEL[value]}
+    </span>
+  );
+
+  if (!canEdit) return chip;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "inline-flex h-7 items-center justify-center rounded-full border px-2.5 text-[11px] font-medium uppercase tracking-wide",
-            PROJECT_ITEM_CATEGORY_CLASS[value],
-          )}
-        >
-          {PROJECT_ITEM_CATEGORY_LABEL[value]}
+        <button type="button" className="text-left">
+          {chip}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
@@ -275,25 +530,34 @@ function CategoryCell({
 
 function StatusCell({
   value,
+  canEdit,
   onChange,
 }: {
   value: ProjectItemStatus;
+  canEdit: boolean;
   onChange: (next: ProjectItemStatus) => void;
 }) {
+  const chip = (
+    <span
+      className={cn(
+        "inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium",
+        PROJECT_ITEM_STATUS_CLASS[value],
+      )}
+    >
+      <span
+        className={cn("size-1.5 rounded-full", PROJECT_ITEM_STATUS_DOT[value])}
+      />
+      {PROJECT_ITEM_STATUS_LABEL[value]}
+    </span>
+  );
+
+  if (!canEdit) return chip;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium",
-            PROJECT_ITEM_STATUS_CLASS[value],
-          )}
-        >
-          <span
-            className={cn("size-1.5 rounded-full", PROJECT_ITEM_STATUS_DOT[value])}
-          />
-          {PROJECT_ITEM_STATUS_LABEL[value]}
+        <button type="button" className="text-left">
+          {chip}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
@@ -313,9 +577,11 @@ function StatusCell({
 
 function DueDateCell({
   value,
+  canEdit,
   onChange,
 }: {
   value: string | null;
+  canEdit: boolean;
   onChange: (next: string | null) => void;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -329,6 +595,36 @@ function DueDateCell({
   const label = formatDueLabel(value);
   const tone = dueTone(value);
 
+  const chip = (
+    <span
+      className={cn(
+        "inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium",
+        tone,
+      )}
+    >
+      <CalendarDays className="size-3" />
+      {label}
+    </span>
+  );
+
+  if (!canEdit) return chip;
+
+  function applyShift(days: number) {
+    const base = value ? parseISO(value) : startOfDay(new Date());
+    const next = addDays(base, days);
+    const iso = format(next, "yyyy-MM-dd");
+    setDraft(iso);
+    onChange(iso);
+    setOpen(false);
+  }
+
+  function applyAbsolute(date: Date) {
+    const iso = format(date, "yyyy-MM-dd");
+    setDraft(iso);
+    onChange(iso);
+    setOpen(false);
+  }
+
   function save() {
     setOpen(false);
     const next = draft.trim() || null;
@@ -338,24 +634,64 @@ function DueDateCell({
   return (
     <Popover open={open} onOpenChange={handleOpen}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium",
-            tone,
-          )}
-        >
-          <CalendarDays className="size-3" />
-          {label}
+        <button type="button" className="text-left">
+          {chip}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-64 space-y-2" align="start">
-        <div className="text-xs font-medium">Fecha límite</div>
-        <Input
-          type="date"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-        />
+      <PopoverContent className="w-72 space-y-3" align="start">
+        <div className="space-y-1">
+          <div className="text-xs font-medium">Fecha límite</div>
+          <Input
+            type="date"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <div className="text-muted-foreground mb-1 text-[10px] font-medium uppercase tracking-wider">
+            Snooze rápido
+          </div>
+          <div className="grid grid-cols-4 gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 px-1.5 text-[11px]"
+              onClick={() => applyAbsolute(addDays(new Date(), 1))}
+            >
+              Mañana
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 px-1.5 text-[11px]"
+              onClick={() => applyAbsolute(nextMonday(new Date()))}
+            >
+              Próx. lun
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 px-1.5 text-[11px]"
+              onClick={() => applyShift(7)}
+            >
+              +1 sem
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 px-1.5 text-[11px]"
+              onClick={() => applyAbsolute(addWeeks(new Date(), 2))}
+            >
+              +2 sem
+            </Button>
+          </div>
+        </div>
+
         <div className="flex items-center justify-between gap-2">
           {value ? (
             <Button
@@ -383,14 +719,19 @@ function DueDateCell({
 }
 
 function RowMenu({
-  item,
+  canEdit,
+  isArchived,
+  onArchive,
   onDelete,
   onToggleDone,
 }: {
-  item: ProjectItem;
+  canEdit: boolean;
+  isArchived: boolean;
+  onArchive: () => void;
   onDelete: () => void;
   onToggleDone: () => void;
 }) {
+  if (!canEdit) return null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -398,23 +739,34 @@ function RowMenu({
           type="button"
           size="icon"
           variant="ghost"
-          className="size-7 opacity-0 group-hover:opacity-100"
+          className="size-7 opacity-60 group-hover:opacity-100 md:opacity-0"
           aria-label="Acciones"
         >
           <MoreHorizontal className="size-3.5" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuLabel className="text-xs">
-          {item.project}
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
         <DropdownMenuItem onClick={onToggleDone}>
-          {item.status === "done" ? "Reabrir" : "Marcar como Done"}
+          <Check className="size-3.5" />
+          Toggle Done
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={onArchive}>
+          {isArchived ? (
+            <>
+              <ArchiveRestore className="size-3.5" />
+              Reactivar
+            </>
+          ) : (
+            <>
+              <Archive className="size-3.5" />
+              Archivar
+            </>
+          )}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() => {
-            if (confirm(`¿Eliminar "${item.title}"?`)) onDelete();
+            if (confirm("¿Eliminar esta tarea?")) onDelete();
           }}
           className="text-destructive focus:text-destructive"
         >
@@ -437,9 +789,9 @@ function formatDueLabel(value: string | null): string {
 function dueTone(value: string | null): string {
   if (!value) return "bg-muted/40 text-muted-foreground border-transparent";
   const date = parseISO(value);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (date < today) return PROJECT_ITEM_STATUS_CLASS.pending;
+  const today = startOfDay(new Date());
+  if (date < today && !isToday(date) && isPast(date))
+    return "bg-rose-500/15 text-rose-700 border-rose-500/40 dark:text-rose-200";
   if (isToday(date) || isTomorrow(date))
     return "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-200";
   return "bg-muted/40 text-foreground border-border";

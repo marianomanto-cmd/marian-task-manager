@@ -2,29 +2,46 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
-import { listProjectItemsAction } from "@/app/actions/projects";
-import type { ProjectItem } from "@/lib/projects/types";
+import {
+  listProjectBoardAction,
+  type ListProjectItemsInput,
+  type ProjectBoardData,
+} from "@/app/actions/projects";
 
 export const PROJECT_ITEMS_KEY = ["project-items"] as const;
 
-export type ProjectItemsQueryResult =
-  | { items: ProjectItem[]; authRequired: false; error: null }
-  | { items: []; authRequired: true; error: string }
-  | { items: []; authRequired: false; error: string };
+export function projectBoardKey(filter: ListProjectItemsInput) {
+  return [...PROJECT_ITEMS_KEY, filter.archiveMode ?? "active"] as const;
+}
 
-export function useProjectItems(): UseQueryResult<ProjectItemsQueryResult> {
+export type ProjectBoardQueryResult =
+  | { data: ProjectBoardData; authRequired: false; error: null }
+  | { data: { items: []; meta: [] }; authRequired: true; error: string }
+  | { data: { items: []; meta: [] }; authRequired: false; error: string };
+
+export function useProjectBoard(
+  filter: ListProjectItemsInput = {},
+): UseQueryResult<ProjectBoardQueryResult> {
   return useQuery({
-    queryKey: PROJECT_ITEMS_KEY,
+    queryKey: projectBoardKey(filter),
     staleTime: 30_000,
-    queryFn: async (): Promise<ProjectItemsQueryResult> => {
-      const result = await listProjectItemsAction();
+    queryFn: async (): Promise<ProjectBoardQueryResult> => {
+      const result = await listProjectBoardAction(filter);
       if (result.ok) {
-        return { items: result.data, authRequired: false, error: null };
+        return { data: result.data, authRequired: false, error: null };
       }
       if (result.code === "auth_required") {
-        return { items: [], authRequired: true, error: result.message };
+        return {
+          data: { items: [], meta: [] },
+          authRequired: true,
+          error: result.message,
+        };
       }
-      return { items: [], authRequired: false, error: result.message };
+      return {
+        data: { items: [], meta: [] },
+        authRequired: false,
+        error: result.message,
+      };
     },
   });
 }

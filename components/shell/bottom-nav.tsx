@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
 export function BottomNav({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
   const items = visibleNavItems(isAdmin);
-  // Tailwind needs the explicit class name for the dynamic column count.
+  // With a single nav item there's nothing to switch to — skip the bar.
+  if (items.length <= 1) return null;
   const gridCols = items.length === 2 ? "grid-cols-2" : "grid-cols-1";
 
   return (
