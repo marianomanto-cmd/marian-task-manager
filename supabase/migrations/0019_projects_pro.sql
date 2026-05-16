@@ -76,7 +76,9 @@ create unique index if not exists user_settings_share_token_idx
 
 -- 4. Public read RPC. SECURITY DEFINER so it bypasses RLS for the rows
 -- that match a valid token. Returns active items only (no archived) and
--- without internal columns.
+-- without internal columns. `position` is a reserved word in PG so it has
+-- to be quoted both in the RETURNS TABLE column list and when selecting
+-- it from the source table.
 create or replace function public.get_shared_projects(token uuid)
 returns table (
   id uuid,
@@ -87,7 +89,7 @@ returns table (
   status text,
   due_date date,
   link text,
-  position integer
+  "position" integer
 )
 language sql
 security definer
@@ -101,11 +103,11 @@ as $$
   )
   select
     pi.id, pi.project, pi.title, pi.description, pi.category, pi.status,
-    pi.due_date, pi.link, pi.position
+    pi.due_date, pi.link, pi."position"
   from public.project_items pi
   join owner o on o.user_id = pi.user_id
   where pi.archived_at is null
-  order by pi.project asc, pi.position asc, pi.created_at asc;
+  order by pi.project asc, pi."position" asc, pi.created_at asc;
 $$;
 
 create or replace function public.get_shared_projects_meta(token uuid)
@@ -113,7 +115,7 @@ returns table (
   project text,
   color text,
   emoji text,
-  position integer
+  "position" integer
 )
 language sql
 security definer
@@ -125,10 +127,10 @@ as $$
     where projects_share_token = token
     limit 1
   )
-  select pm.project, pm.color, pm.emoji, pm.position
+  select pm.project, pm.color, pm.emoji, pm."position"
   from public.projects_meta pm
   join owner o on o.user_id = pm.user_id
-  order by pm.position asc, pm.project asc;
+  order by pm."position" asc, pm.project asc;
 $$;
 
 -- Allow anon (unauthenticated) clients to call the RPCs. Without this
