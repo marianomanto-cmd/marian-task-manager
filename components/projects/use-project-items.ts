@@ -16,8 +16,12 @@ export function projectBoardKey(filter: ListProjectItemsInput) {
 
 export type ProjectBoardQueryResult =
   | { data: ProjectBoardData; authRequired: false; error: null }
-  | { data: { items: []; meta: [] }; authRequired: true; error: string }
-  | { data: { items: []; meta: [] }; authRequired: false; error: string };
+  | { data: { items: []; meta: []; clients: [] }; authRequired: true; error: string }
+  | {
+      data: { items: []; meta: []; clients: [] };
+      authRequired: false;
+      error: string;
+    };
 
 export function useProjectBoard(
   filter: ListProjectItemsInput = {},
@@ -32,13 +36,13 @@ export function useProjectBoard(
       }
       if (result.code === "auth_required") {
         return {
-          data: { items: [], meta: [] },
+          data: { items: [], meta: [], clients: [] },
           authRequired: true,
           error: result.message,
         };
       }
       return {
-        data: { items: [], meta: [] },
+        data: { items: [], meta: [], clients: [] },
         authRequired: false,
         error: result.message,
       };

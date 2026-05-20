@@ -22,15 +22,24 @@ import {
 } from "@/lib/projects/types";
 import { cn } from "@/lib/utils";
 
+const clientSelectClass = cn(
+  "border-input dark:bg-input/30 focus-visible:border-ring focus-visible:ring-ring/50",
+  "h-9 w-full rounded-md border bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]",
+);
+
 export function ProjectMetaEditor({
   project,
   color,
   emoji,
+  client,
+  clients,
   trigger,
 }: {
   project: string;
   color: ProjectColor;
   emoji: string | null;
+  client?: string | null;
+  clients?: string[];
   trigger?: React.ReactNode;
 }) {
   const qc = useQueryClient();
@@ -46,6 +55,7 @@ export function ProjectMetaEditor({
     mutationFn: async (patch: {
       color?: ProjectColor;
       emoji?: string | null;
+      client?: string | null;
     }) => {
       const result = await updateProjectMetaAction({
         project,
@@ -93,6 +103,27 @@ export function ProjectMetaEditor({
             </div>
           </div>
         </div>
+
+        {clients && clients.length > 0 ? (
+          <div>
+            <div className="text-muted-foreground mb-1.5 text-[11px] font-medium uppercase tracking-wider">
+              Cliente
+            </div>
+            <select
+              value={client ?? ""}
+              onChange={(e) => mutation.mutate({ client: e.target.value || null })}
+              className={clientSelectClass}
+              aria-label="Cliente del proyecto"
+            >
+              <option value="">Sin cliente</option>
+              {clients.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
 
         <div>
           <div className="text-muted-foreground mb-1.5 text-[11px] font-medium uppercase tracking-wider">
