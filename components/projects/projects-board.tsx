@@ -10,12 +10,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -26,7 +21,6 @@ import {
   RefreshCw,
   Rows3,
   Search,
-  Users,
   X,
 } from "lucide-react";
 
@@ -35,9 +29,8 @@ import {
   createProjectItemAction,
   deleteClientAction,
   reorderProjectItemsAction,
-  reorderProjectsAction,
 } from "@/app/actions/projects";
-import { ClientGroup, ProjectGroup } from "@/components/projects/project-group";
+import { ClientGroup } from "@/components/projects/project-group";
 import { ShareButton } from "@/components/projects/share-button";
 import {
   PROJECT_ITEMS_KEY,
@@ -58,7 +51,6 @@ import {
   PROJECT_ITEM_CATEGORY_LABEL,
   PROJECT_ITEM_STATUSES,
   PROJECT_ITEM_STATUS_LABEL,
-  defaultProjectMeta,
   type Client,
   type DensityMode,
   type ProjectItem,
@@ -78,7 +70,6 @@ const CATEGORY_OPTIONS = PROJECT_ITEM_CATEGORIES.map((c) => ({
 }));
 
 type View = "active" | "archive";
-type GroupBy = "project" | "client";
 
 /** Sentinel filter/group value for projects with no client assigned. */
 const NO_CLIENT = "__none__";
@@ -94,8 +85,9 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
   const [categories, setCategories] = React.useState<ProjectItemCategory[]>([
     ...PROJECT_ITEM_CATEGORIES,
   ]);
-  const [clientFilter, setClientFilter] = React.useState<string[] | null>(null);
-  const [groupBy, setGroupBy] = React.useState<GroupBy>("project");
+  const [selectedClient, setSelectedClient] = React.useState<string | null>(
+    null,
+  );
   const [search, setSearch] = React.useState("");
   const [density, setDensity] = React.useState<DensityMode>("comfortable");
   const searchRef = React.useRef<HTMLInputElement>(null);
@@ -125,35 +117,18 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     return map;
   }, [meta]);
 
-  const clientOptions = React.useMemo(
-    () => [
-      ...clientNames.map((n) => ({ value: n, label: n })),
-      { value: NO_CLIENT, label: "Sin cliente" },
-    ],
-    [clientNames],
-  );
-  const allClientValues = React.useMemo(
-    () => clientOptions.map((o) => o.value),
-    [clientOptions],
-  );
-
   const filtered = React.useMemo(() => {
     const term = search.trim().toLowerCase();
-    const clientSet = clientFilter ? new Set(clientFilter) : null;
     return items.filter((it) => {
       if (!statuses.includes(it.status)) return false;
       if (!categories.includes(it.category)) return false;
-      if (clientSet) {
-        const c = clientByProject.get(it.project) ?? null;
-        if (!clientSet.has(c ?? NO_CLIENT)) return false;
-      }
       if (term.length > 0) {
         const hay = `${it.project} ${it.title} ${it.description ?? ""}`.toLowerCase();
         if (!hay.includes(term)) return false;
       }
       return true;
     });
-  }, [items, statuses, categories, search, clientFilter, clientByProject]);
+  }, [items, statuses, categories, search]);
 
   const grouped = React.useMemo(() => {
     const map = new Map<string, ProjectItem[]>();
@@ -195,6 +170,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
       return a.localeCompare(b, "es");
     });
     return entries.map(([key, projects]) => ({
+      key,
       client: key === NO_CLIENT ? "Sin cliente" : key,
       projects: projects.map(({ project, items: list }) => ({
         project,
@@ -203,6 +179,19 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
       })),
     }));
   }, [orderedGroups, clientByProject, clients, metaByProject]);
+
+  const hasUnassigned = React.useMemo(
+    () => clientGroups.some((g) => g.key === NO_CLIENT),
+    [clientGroups],
+  );
+
+  const visibleClientGroups = React.useMemo(
+    () =>
+      selectedClient === null
+        ? clientGroups
+        : clientGroups.filter((g) => g.key === selectedClient),
+    [clientGroups, selectedClient],
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -224,33 +213,12 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     onError: (err: Error) => showToast({ title: err.message }),
   });
 
-  const reorderProjectsMutation = useMutation({
-    mutationFn: async (projects: string[]) => {
-      const result = await reorderProjectsAction({ projects });
-      if (!result.ok) throw new Error(result.message);
-      return result.data;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY }),
-    onError: (err: Error) => showToast({ title: err.message }),
-  });
-
   function handleDragEnd(event: DragEndEvent) {
-    if (groupBy !== "project") return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
     const activeId = String(active.id);
     const overId = String(over.id);
-
-    if (activeId.startsWith("project:") && overId.startsWith("project:")) {
-      const names = orderedGroups.map(([p]) => p);
-      const oldIdx = names.indexOf(activeId.slice("project:".length));
-      const newIdx = names.indexOf(overId.slice("project:".length));
-      if (oldIdx === -1 || newIdx === -1) return;
-      const next = arrayMove(names, oldIdx, newIdx);
-      reorderProjectsMutation.mutate(next);
-      return;
-    }
 
     const activeItem = items.find((it) => it.id === activeId);
     const overItem = items.find((it) => it.id === overId);
@@ -326,15 +294,8 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     URL.revokeObjectURL(url);
   }
 
-  const projectIds = orderedGroups.map(([p]) => `project:${p}`);
   const inArchive = view === "archive";
-  const byClient = groupBy === "client";
-  const sortableIds = byClient
-    ? filtered.map((it) => it.id)
-    : projectIds;
-  const hasGroups = byClient
-    ? clientGroups.length > 0
-    : orderedGroups.length > 0;
+  const hasGroups = visibleClientGroups.length > 0;
 
   return (
     <section className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
@@ -346,7 +307,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
           <p className="text-muted-foreground text-xs">
             {inArchive
               ? "Tareas archivadas. Reactivá las que vuelvan a estar en juego."
-              : "Tareas por cliente, agrupadas por proyecto. Visible para todo el equipo; sólo Mariano edita."}
+              : "Pendientes por cliente. Elegí un cliente arriba para ver sus proyectos y tareas. Visible para todo el equipo; sólo Mariano edita."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -380,8 +341,6 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
           >
             <RefreshCw className={cn(query.isFetching && "animate-spin")} />
           </Button>
-          <GroupByToggle value={groupBy} onChange={setGroupBy} />
-          {canEdit && !inArchive ? <ClientManager clients={clients} /> : null}
           <DensityToggle value={density} onChange={setDensity} />
           {canEdit && !inArchive ? <ShareButton /> : null}
           <Button
@@ -405,6 +364,14 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
         </div>
       </header>
 
+      <ClientTabs
+        clients={clients}
+        selected={selectedClient}
+        onSelect={setSelectedClient}
+        hasUnassigned={hasUnassigned}
+        canEdit={canEdit && !inArchive}
+      />
+
       <div className="flex flex-col gap-2">
         <FilterChips<ProjectItemStatus>
           label="Status"
@@ -418,14 +385,6 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
           selected={categories}
           onChange={setCategories}
         />
-        {clientNames.length > 0 ? (
-          <FilterChips<string>
-            label="Cliente"
-            options={clientOptions}
-            selected={clientFilter ?? allClientValues}
-            onChange={setClientFilter}
-          />
-        ) : null}
       </div>
 
       {query.data?.authRequired ? (
@@ -453,36 +412,18 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
           collisionDetection={closestCenter}
           onDragEnd={handleDragEnd}
         >
-          <SortableContext
-            items={sortableIds}
-            strategy={verticalListSortingStrategy}
-          >
-            <div className="flex flex-col gap-4">
-              {byClient
-                ? clientGroups.map((cg) => (
-                    <ClientGroup
-                      key={cg.client}
-                      client={cg.client}
-                      projects={cg.projects}
-                      canEdit={canEdit && !inArchive}
-                      density={density}
-                    />
-                  ))
-                : orderedGroups.map(([project, list]) => (
-                    <ProjectGroup
-                      key={project}
-                      project={project}
-                      items={list}
-                      meta={
-                        metaByProject.get(project) ?? defaultProjectMeta(project)
-                      }
-                      canEdit={canEdit && !inArchive}
-                      density={density}
-                      clientNames={clientNames}
-                    />
-                  ))}
-            </div>
-          </SortableContext>
+          <div className="flex flex-col gap-4">
+            {visibleClientGroups.map((cg) => (
+              <ClientGroup
+                key={cg.key}
+                client={cg.client}
+                projects={cg.projects}
+                canEdit={canEdit && !inArchive}
+                density={density}
+                clientNames={clientNames}
+              />
+            ))}
+          </div>
         </DndContext>
       )}
 
@@ -491,47 +432,21 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-function GroupByToggle({
-  value,
-  onChange,
+function ClientTabs({
+  clients,
+  selected,
+  onSelect,
+  hasUnassigned,
+  canEdit,
 }: {
-  value: GroupBy;
-  onChange: (next: GroupBy) => void;
+  clients: Client[];
+  selected: string | null;
+  onSelect: (next: string | null) => void;
+  hasUnassigned: boolean;
+  canEdit: boolean;
 }) {
-  return (
-    <div
-      className="flex items-center gap-0.5 rounded-md border p-0.5"
-      role="group"
-      aria-label="Agrupar por"
-    >
-      {(
-        [
-          { v: "project", label: "Proyecto" },
-          { v: "client", label: "Cliente" },
-        ] as const
-      ).map(({ v, label }) => (
-        <button
-          key={v}
-          type="button"
-          onClick={() => onChange(v)}
-          aria-pressed={value === v}
-          className={cn(
-            "rounded px-2 py-1 text-xs font-medium transition-colors",
-            value === v
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function ClientManager({ clients }: { clients: Client[] }) {
   const qc = useQueryClient();
-  const [open, setOpen] = React.useState(false);
+  const [addOpen, setAddOpen] = React.useState(false);
   const [name, setName] = React.useState("");
 
   const createMutation = useMutation({
@@ -540,9 +455,11 @@ function ClientManager({ clients }: { clients: Client[] }) {
       if (!result.ok) throw new Error(result.message);
       return result.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setName("");
+      setAddOpen(false);
       qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
+      onSelect(data.name);
     },
     onError: (err: Error) => showToast({ title: err.message }),
   });
@@ -553,7 +470,10 @@ function ClientManager({ clients }: { clients: Client[] }) {
       if (!result.ok) throw new Error(result.message);
       return result.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
+      if (selected === data.name) onSelect(null);
+    },
     onError: (err: Error) => showToast({ title: err.message }),
   });
 
@@ -562,71 +482,122 @@ function ClientManager({ clients }: { clients: Client[] }) {
     if (trimmed) createMutation.mutate(trimmed);
   }
 
+  function pillClass(active: boolean) {
+    return cn(
+      "inline-flex h-7 items-center gap-1 rounded-full border px-3 text-xs font-medium transition-colors",
+      active
+        ? "border-primary bg-primary text-primary-foreground"
+        : "bg-background hover:bg-accent",
+    );
+  }
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button type="button" variant="outline" size="sm" title="Clientes">
-          <Users />
-          Clientes
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 space-y-3">
-        <div className="text-sm font-medium">Clientes</div>
-        <div className="space-y-1">
-          {clients.length === 0 ? (
-            <p className="text-muted-foreground text-xs">
-              Todavía no hay clientes. Agregá el primero abajo.
-            </p>
-          ) : (
-            clients.map((c) => (
-              <div key={c.name} className="flex items-center gap-2">
-                <span className="flex-1 truncate text-sm">{c.name}</span>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="text-muted-foreground hover:text-destructive size-7"
-                  onClick={() => {
-                    if (
-                      confirm(
-                        `¿Quitar el cliente "${c.name}"? Los proyectos asignados quedan sin cliente.`,
-                      )
-                    )
-                      deleteMutation.mutate(c.name);
-                  }}
-                  aria-label={`Quitar ${c.name}`}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              </div>
-            ))
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                add();
-              }
-            }}
-            placeholder="Nuevo cliente…"
-            className="h-9"
-          />
-          <Button
-            type="button"
-            size="icon"
-            onClick={add}
-            disabled={!name.trim() || createMutation.isPending}
-            aria-label="Agregar cliente"
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+        Cliente
+      </span>
+
+      <button
+        type="button"
+        onClick={() => onSelect(null)}
+        className={pillClass(selected === null)}
+      >
+        Todos
+      </button>
+
+      {clients.map((c) => {
+        const active = selected === c.name;
+        return (
+          <span
+            key={c.name}
+            className={cn(pillClass(active), canEdit && "pr-1")}
           >
-            <Plus className="size-3.5" />
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
+            <button
+              type="button"
+              onClick={() => onSelect(c.name)}
+              className="max-w-[12rem] truncate"
+            >
+              {c.name}
+            </button>
+            {canEdit ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    confirm(
+                      `¿Quitar el cliente "${c.name}"? Los proyectos asignados quedan sin cliente.`,
+                    )
+                  )
+                    deleteMutation.mutate(c.name);
+                }}
+                aria-label={`Quitar ${c.name}`}
+                className={cn(
+                  "inline-flex size-4 items-center justify-center rounded-full",
+                  active
+                    ? "hover:bg-primary-foreground/20"
+                    : "text-muted-foreground hover:text-destructive",
+                )}
+              >
+                <X className="size-3" />
+              </button>
+            ) : null}
+          </span>
+        );
+      })}
+
+      {hasUnassigned ? (
+        <button
+          type="button"
+          onClick={() => onSelect(NO_CLIENT)}
+          className={pillClass(selected === NO_CLIENT)}
+        >
+          Sin cliente
+        </button>
+      ) : null}
+
+      {canEdit ? (
+        <Popover open={addOpen} onOpenChange={setAddOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              className="size-7 rounded-full"
+              aria-label="Agregar cliente"
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-64 space-y-2">
+            <div className="text-xs font-medium">Nuevo cliente</div>
+            <div className="flex items-center gap-2">
+              <Input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    add();
+                  }
+                }}
+                placeholder="Nombre del cliente…"
+                className="h-9"
+              />
+              <Button
+                type="button"
+                size="icon"
+                onClick={add}
+                disabled={!name.trim() || createMutation.isPending}
+                aria-label="Agregar"
+              >
+                <Plus className="size-3.5" />
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      ) : null}
+    </div>
   );
 }
 

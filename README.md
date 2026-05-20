@@ -3,19 +3,18 @@
 App interna de la agencia. Dos pestañas:
 
 - **Mi board** (`/tasks`): tareas asignables a cualquier miembro del equipo. Cada uno usa su propio board si quiere (filtros "Sólo mías"). Visible para todo el equipo, sin notificaciones externas.
-- **Proyectos** (`/projects`): board de pendientes que Mariano comparte con clientes. Filas agrupadas por proyecto (o por cliente) con categoría, status, due date, link y nota. Cada proyecto puede asignarse a un cliente. Sólo Mariano edita; todo el equipo lo ve.
+- **Proyectos** (`/projects`): board de pendientes que Mariano comparte con clientes. Organizado por cliente → proyecto → tareas, con categoría, status, due date, link y nota. Filtro maestro de cliente en pestañas. Sólo Mariano edita; todo el equipo lo ve.
 - **Vista compartida** (`/p/<token>`): link público de sólo lectura para clientes. Se genera/rota/revoca desde el botón "Compartir" en Proyectos.
 
 Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calendar, ni Slack.
 
 ### Proyectos: features clave
 
-- Clientes: cada proyecto pertenece (opcional) a un cliente. Lista gestionable desde el botón "Clientes" (agregar/quitar). Al quitar un cliente, sus proyectos quedan "Sin cliente".
-- Agrupación con toggle **Proyecto / Cliente**. En vista Cliente se ve la jerarquía Cliente → Proyecto → Tareas.
-- Filtro de clientes (chips multi-selección, incluye "Sin cliente").
-- Renombrar proyecto: click directo sobre el nombre en el header y escribir encima (Enter o salir guarda, Escape cancela).
-- Drag & drop para reordenar tareas dentro de un proyecto y proyectos entre sí (sólo en vista Proyecto).
-- Color + emoji por proyecto (icono en el header de cada grupo); el cliente se asigna desde el mismo editor.
+- Filtro maestro de cliente en pestañas arriba de la sección: `[Todos] [Cliente ×] … (+)`. Click para ver sólo ese cliente; `+` agrega y `×` quita clientes. "Sin cliente" agrupa los proyectos sin asignar.
+- El board siempre muestra la jerarquía Cliente → Proyectos → Tareas. Cada cliente es colapsable.
+- Cada proyecto (dentro de su cliente) conserva sus controles: renombrar inline (click en el nombre), color + emoji, asignar cliente y eliminar.
+- Drag & drop para reordenar tareas dentro de cada proyecto.
+- Color + emoji por proyecto; el cliente se asigna desde el mismo editor (ícono de paleta).
 - Status con barra de color a la izquierda de cada fila (pending=rojo, ongoing=verde, waiting=azul, done=gris).
 - Due date con badges relativos ("Hoy", "Mañana", "d MMM") y snooze rápido (+1d, próx. lunes, +1sem, +2sem).
 - Densidad cómoda/compacta.
