@@ -17,7 +17,6 @@ import {
   GripVertical,
   MoreHorizontal,
   Palette,
-  Pencil,
   Trash2,
 } from "lucide-react";
 
@@ -35,15 +34,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { showToast } from "@/components/ui/toast";
 import {
   PROJECT_COLOR_CLASS,
@@ -161,9 +154,7 @@ export function ProjectGroup({
           size="md"
         />
 
-        <h2 className="truncate text-sm font-semibold tracking-tight md:text-base">
-          {project}
-        </h2>
+        <ProjectName project={project} canEdit={canEdit} />
 
         <div className="hidden items-center gap-1.5 pl-2 lg:flex">
           {STATUS_ORDER.map((s) =>
@@ -236,6 +227,94 @@ export function ProjectGroup({
   );
 }
 
+function ProjectName({
+  project,
+  canEdit,
+}: {
+  project: string;
+  canEdit: boolean;
+}) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(project);
+
+  const renameMutation = useMutation({
+    mutationFn: async (to: string) => {
+      const result = await renameProjectAction({ from: project, to });
+      if (!result.ok) throw new Error(result.message);
+      return result.data;
+    },
+    onSuccess: () => {
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
+    },
+    onError: (err: Error) => {
+      showToast({ title: err.message });
+      setDraft(project);
+      setEditing(false);
+    },
+  });
+
+  function beginEdit() {
+    if (!canEdit) return;
+    setDraft(project);
+    setEditing(true);
+  }
+
+  function commit() {
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== project) renameMutation.mutate(trimmed);
+    else {
+      setDraft(project);
+      setEditing(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <Input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setDraft(project);
+            setEditing(false);
+          }
+        }}
+        disabled={renameMutation.isPending}
+        className="h-7 w-48 max-w-full text-sm font-semibold md:text-base"
+      />
+    );
+  }
+
+  if (!canEdit) {
+    return (
+      <h2 className="truncate text-sm font-semibold tracking-tight md:text-base">
+        {project}
+      </h2>
+    );
+  }
+
+  return (
+    <h2 className="min-w-0 truncate">
+      <button
+        type="button"
+        onClick={beginEdit}
+        className="-mx-1 max-w-full cursor-text truncate rounded px-1 text-left text-sm font-semibold tracking-tight hover:bg-foreground/5 md:text-base"
+        title="Click para renombrar"
+      >
+        {project}
+      </button>
+    </h2>
+  );
+}
+
 function GroupMenu({
   project,
   color,
@@ -246,26 +325,6 @@ function GroupMenu({
   emoji: string | null;
 }) {
   const qc = useQueryClient();
-  const [renameOpen, setRenameOpen] = React.useState(false);
-  const [draft, setDraft] = React.useState(project);
-
-  function openRename() {
-    setDraft(project);
-    setRenameOpen(true);
-  }
-
-  const renameMutation = useMutation({
-    mutationFn: async (to: string) => {
-      const result = await renameProjectAction({ from: project, to });
-      if (!result.ok) throw new Error(result.message);
-      return result.data;
-    },
-    onSuccess: () => {
-      setRenameOpen(false);
-      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
-    },
-    onError: (err: Error) => showToast({ title: err.message }),
-  });
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -314,11 +373,6 @@ function GroupMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={openRename}>
-            <Pencil className="size-3.5" />
-            Renombrar proyecto
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => {
               if (
@@ -335,36 +389,6 @@ function GroupMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-
-      <Popover open={renameOpen} onOpenChange={setRenameOpen}>
-        <PopoverTrigger asChild>
-          <span className="sr-only" />
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-72 space-y-2">
-          <div className="text-xs font-medium">Renombrar proyecto</div>
-          <Input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && draft.trim() && draft !== project) {
-                e.preventDefault();
-                renameMutation.mutate(draft.trim());
-              }
-            }}
-            autoFocus
-          />
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => renameMutation.mutate(draft.trim())}
-              disabled={!draft.trim() || draft === project}
-            >
-              Guardar
-            </Button>
-          </div>
-        </PopoverContent>
-      </Popover>
     </>
   );
 }
