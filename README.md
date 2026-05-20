@@ -3,15 +3,19 @@
 App interna de la agencia. Dos pestañas:
 
 - **Mi board** (`/tasks`): tareas asignables a cualquier miembro del equipo. Cada uno usa su propio board si quiere (filtros "Sólo mías"). Visible para todo el equipo, sin notificaciones externas.
-- **Proyectos** (`/projects`): board de pendientes que Mariano comparte con clientes. Filas agrupadas por proyecto con categoría, status, due date, link y nota. Sólo Mariano edita; todo el equipo lo ve.
+- **Proyectos** (`/projects`): board de pendientes que Mariano comparte con clientes. Filas agrupadas por proyecto (o por cliente) con categoría, status, due date, link y nota. Cada proyecto puede asignarse a un cliente. Sólo Mariano edita; todo el equipo lo ve.
 - **Vista compartida** (`/p/<token>`): link público de sólo lectura para clientes. Se genera/rota/revoca desde el botón "Compartir" en Proyectos.
 
 Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calendar, ni Slack.
 
 ### Proyectos: features clave
 
-- Drag & drop para reordenar tareas dentro de un proyecto y proyectos entre sí.
-- Color + emoji por proyecto (icono en el header de cada grupo).
+- Clientes: cada proyecto pertenece (opcional) a un cliente. Lista gestionable desde el botón "Clientes" (agregar/quitar). Al quitar un cliente, sus proyectos quedan "Sin cliente".
+- Agrupación con toggle **Proyecto / Cliente**. En vista Cliente se ve la jerarquía Cliente → Proyecto → Tareas.
+- Filtro de clientes (chips multi-selección, incluye "Sin cliente").
+- Renombrar proyecto: click directo sobre el nombre en el header y escribir encima (Enter o salir guarda, Escape cancela).
+- Drag & drop para reordenar tareas dentro de un proyecto y proyectos entre sí (sólo en vista Proyecto).
+- Color + emoji por proyecto (icono en el header de cada grupo); el cliente se asigna desde el mismo editor.
 - Status con barra de color a la izquierda de cada fila (pending=rojo, ongoing=verde, waiting=azul, done=gris).
 - Due date con badges relativos ("Hoy", "Mañana", "d MMM") y snooze rápido (+1d, próx. lunes, +1sem, +2sem).
 - Densidad cómoda/compacta.
