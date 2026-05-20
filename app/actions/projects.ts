@@ -8,6 +8,7 @@ import {
   PROJECT_COLORS,
   PROJECT_ITEM_CATEGORIES,
   PROJECT_ITEM_STATUSES,
+  type Client,
   type ProjectColor,
   type ProjectItem,
   type ProjectItemCategory,
@@ -86,7 +87,14 @@ const metaUpdateSchema = z.object({
   project: projectSchema,
   color: colorSchema.optional(),
   emoji: z.string().trim().max(8).nullable().optional(),
+  client: z.string().trim().max(120).nullable().optional(),
 });
+
+const clientNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Falta el nombre del cliente")
+  .max(120);
 
 export type ListProjectItemsInput = z.infer<typeof listSchema>;
 export type CreateProjectItemInput = z.infer<typeof createSchema>;
@@ -159,6 +167,7 @@ function asUnknown(err: unknown): ActionResult<never> {
 export type ProjectBoardData = {
   items: ProjectItem[];
   meta: ProjectMeta[];
+  clients: Client[];
 };
 
 export async function listProjectBoardAction(
@@ -186,23 +195,30 @@ export async function listProjectBoardAction(
       itemsQuery = itemsQuery.not("archived_at", "is", null);
     }
 
-    const [itemsRes, metaRes] = await Promise.all([
+    const [itemsRes, metaRes, clientsRes] = await Promise.all([
       itemsQuery,
       supabase
         .from("projects_meta")
-        .select("project, color, emoji, position")
+        .select("project, color, emoji, client, position")
         .order("position", { ascending: true })
         .order("project", { ascending: true }),
+      supabase
+        .from("clients")
+        .select("name, position")
+        .order("position", { ascending: true })
+        .order("name", { ascending: true }),
     ]);
 
     if (itemsRes.error) throw new Error(itemsRes.error.message);
     if (metaRes.error) throw new Error(metaRes.error.message);
+    if (clientsRes.error) throw new Error(clientsRes.error.message);
 
     return {
       ok: true,
       data: {
         items: (itemsRes.data ?? []) as ProjectItem[],
         meta: (metaRes.data ?? []) as ProjectMeta[],
+        clients: (clientsRes.data ?? []) as Client[],
       },
     };
   } catch (err) {
@@ -487,14 +503,100 @@ export async function updateProjectMetaAction(
     if (parsed.data.color !== undefined) patch.color = parsed.data.color;
     if (parsed.data.emoji !== undefined)
       patch.emoji = parsed.data.emoji?.length ? parsed.data.emoji : null;
+    if (parsed.data.client !== undefined)
+      patch.client = parsed.data.client?.length ? parsed.data.client : null;
 
     const { data, error } = await supabase
       .from("projects_meta")
       .upsert(patch, { onConflict: "user_id,project" })
-      .select("project, color, emoji, position")
+      .select("project, color, emoji, client, position")
       .single();
     if (error) throw new Error(error.message);
     return { ok: true, data: data as ProjectMeta };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function listClientsAction(): Promise<ActionResult<Client[]>> {
+  const auth = await requireReader();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("clients")
+      .select("name, position")
+      .order("position", { ascending: true })
+      .order("name", { ascending: true });
+    if (error) throw new Error(error.message);
+    return { ok: true, data: (data ?? []) as Client[] };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function createClientAction(
+  input: unknown,
+): Promise<ActionResult<Client>> {
+  const parsed = clientNameSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { data: maxRow } = await supabase
+      .from("clients")
+      .select("position")
+      .eq("user_id", auth.userId)
+      .order("position", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const position = (maxRow?.position ?? -1) + 1;
+
+    const { data, error } = await supabase
+      .from("clients")
+      .upsert(
+        { user_id: auth.userId, name: parsed.data, position },
+        { onConflict: "user_id,name" },
+      )
+      .select("name, position")
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, data: data as Client };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function deleteClientAction(
+  input: unknown,
+): Promise<ActionResult<{ name: string }>> {
+  const parsed = clientNameSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from("clients")
+      .delete()
+      .eq("user_id", auth.userId)
+      .eq("name", parsed.data);
+    if (error) throw new Error(error.message);
+
+    // Unassign any projects that referenced this client.
+    await supabase
+      .from("projects_meta")
+      .update({ client: null })
+      .eq("user_id", auth.userId)
+      .eq("client", parsed.data);
+
+    return { ok: true, data: { name: parsed.data } };
   } catch (err) {
     return asUnknown(err);
   }

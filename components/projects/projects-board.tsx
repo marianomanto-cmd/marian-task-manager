@@ -26,14 +26,18 @@ import {
   RefreshCw,
   Rows3,
   Search,
+  Users,
+  X,
 } from "lucide-react";
 
 import {
+  createClientAction,
   createProjectItemAction,
+  deleteClientAction,
   reorderProjectItemsAction,
   reorderProjectsAction,
 } from "@/app/actions/projects";
-import { ProjectGroup } from "@/components/projects/project-group";
+import { ClientGroup, ProjectGroup } from "@/components/projects/project-group";
 import { ShareButton } from "@/components/projects/share-button";
 import {
   PROJECT_ITEMS_KEY,
@@ -55,6 +59,7 @@ import {
   PROJECT_ITEM_STATUSES,
   PROJECT_ITEM_STATUS_LABEL,
   defaultProjectMeta,
+  type Client,
   type DensityMode,
   type ProjectItem,
   type ProjectItemCategory,
@@ -73,6 +78,10 @@ const CATEGORY_OPTIONS = PROJECT_ITEM_CATEGORIES.map((c) => ({
 }));
 
 type View = "active" | "archive";
+type GroupBy = "project" | "client";
+
+/** Sentinel filter/group value for projects with no client assigned. */
+const NO_CLIENT = "__none__";
 
 export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
   const [view, setView] = React.useState<View>("active");
@@ -85,6 +94,8 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
   const [categories, setCategories] = React.useState<ProjectItemCategory[]>([
     ...PROJECT_ITEM_CATEGORIES,
   ]);
+  const [clientFilter, setClientFilter] = React.useState<string[] | null>(null);
+  const [groupBy, setGroupBy] = React.useState<GroupBy>("project");
   const [search, setSearch] = React.useState("");
   const [density, setDensity] = React.useState<DensityMode>("comfortable");
   const searchRef = React.useRef<HTMLInputElement>(null);
@@ -98,24 +109,51 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     () => query.data?.data.meta ?? [],
     [query.data?.data.meta],
   );
+  const clients = React.useMemo(
+    () => query.data?.data.clients ?? [],
+    [query.data?.data.clients],
+  );
+  const clientNames = React.useMemo(() => clients.map((c) => c.name), [clients]);
   const metaByProject = React.useMemo(() => {
     const map = new Map<string, ProjectMeta>();
     for (const m of meta) map.set(m.project, m);
     return map;
   }, [meta]);
+  const clientByProject = React.useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const m of meta) map.set(m.project, m.client ?? null);
+    return map;
+  }, [meta]);
+
+  const clientOptions = React.useMemo(
+    () => [
+      ...clientNames.map((n) => ({ value: n, label: n })),
+      { value: NO_CLIENT, label: "Sin cliente" },
+    ],
+    [clientNames],
+  );
+  const allClientValues = React.useMemo(
+    () => clientOptions.map((o) => o.value),
+    [clientOptions],
+  );
 
   const filtered = React.useMemo(() => {
     const term = search.trim().toLowerCase();
+    const clientSet = clientFilter ? new Set(clientFilter) : null;
     return items.filter((it) => {
       if (!statuses.includes(it.status)) return false;
       if (!categories.includes(it.category)) return false;
+      if (clientSet) {
+        const c = clientByProject.get(it.project) ?? null;
+        if (!clientSet.has(c ?? NO_CLIENT)) return false;
+      }
       if (term.length > 0) {
         const hay = `${it.project} ${it.title} ${it.description ?? ""}`.toLowerCase();
         if (!hay.includes(term)) return false;
       }
       return true;
     });
-  }, [items, statuses, categories, search]);
+  }, [items, statuses, categories, search, clientFilter, clientByProject]);
 
   const grouped = React.useMemo(() => {
     const map = new Map<string, ProjectItem[]>();
@@ -136,6 +174,35 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
       return a.localeCompare(b, "es");
     });
   }, [grouped, metaByProject]);
+
+  const clientGroups = React.useMemo(() => {
+    const byClient = new Map<string, { project: string; items: ProjectItem[] }[]>();
+    for (const [project, list] of orderedGroups) {
+      const key = clientByProject.get(project) ?? null;
+      const bucket = key ?? NO_CLIENT;
+      if (!byClient.has(bucket)) byClient.set(bucket, []);
+      byClient.get(bucket)!.push({ project, items: list });
+    }
+    const order = new Map<string, number>();
+    clients.forEach((c, i) => order.set(c.name, i));
+    const entries = Array.from(byClient.entries());
+    entries.sort(([a], [b]) => {
+      if (a === NO_CLIENT) return 1;
+      if (b === NO_CLIENT) return -1;
+      const pa = order.get(a) ?? 1e6;
+      const pb = order.get(b) ?? 1e6;
+      if (pa !== pb) return pa - pb;
+      return a.localeCompare(b, "es");
+    });
+    return entries.map(([key, projects]) => ({
+      client: key === NO_CLIENT ? "Sin cliente" : key,
+      projects: projects.map(({ project, items: list }) => ({
+        project,
+        meta: metaByProject.get(project),
+        items: list,
+      })),
+    }));
+  }, [orderedGroups, clientByProject, clients, metaByProject]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -168,6 +235,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
   });
 
   function handleDragEnd(event: DragEndEvent) {
+    if (groupBy !== "project") return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
@@ -260,9 +328,16 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
 
   const projectIds = orderedGroups.map(([p]) => `project:${p}`);
   const inArchive = view === "archive";
+  const byClient = groupBy === "client";
+  const sortableIds = byClient
+    ? filtered.map((it) => it.id)
+    : projectIds;
+  const hasGroups = byClient
+    ? clientGroups.length > 0
+    : orderedGroups.length > 0;
 
   return (
-    <section className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
+    <section className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
@@ -305,6 +380,8 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
           >
             <RefreshCw className={cn(query.isFetching && "animate-spin")} />
           </Button>
+          <GroupByToggle value={groupBy} onChange={setGroupBy} />
+          {canEdit && !inArchive ? <ClientManager clients={clients} /> : null}
           <DensityToggle value={density} onChange={setDensity} />
           {canEdit && !inArchive ? <ShareButton /> : null}
           <Button
@@ -341,6 +418,14 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
           selected={categories}
           onChange={setCategories}
         />
+        {clientNames.length > 0 ? (
+          <FilterChips<string>
+            label="Cliente"
+            options={clientOptions}
+            selected={clientFilter ?? allClientValues}
+            onChange={setClientFilter}
+          />
+        ) : null}
       </div>
 
       {query.data?.authRequired ? (
@@ -356,7 +441,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
 
       {query.isLoading ? (
         <p className="text-muted-foreground text-sm">Cargando board…</p>
-      ) : orderedGroups.length === 0 ? (
+      ) : !hasGroups ? (
         <EmptyState
           canEdit={canEdit}
           hasItems={items.length > 0}
@@ -369,20 +454,33 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
           onDragEnd={handleDragEnd}
         >
           <SortableContext
-            items={projectIds}
+            items={sortableIds}
             strategy={verticalListSortingStrategy}
           >
             <div className="flex flex-col gap-4">
-              {orderedGroups.map(([project, list]) => (
-                <ProjectGroup
-                  key={project}
-                  project={project}
-                  items={list}
-                  meta={metaByProject.get(project) ?? defaultProjectMeta(project)}
-                  canEdit={canEdit && !inArchive}
-                  density={density}
-                />
-              ))}
+              {byClient
+                ? clientGroups.map((cg) => (
+                    <ClientGroup
+                      key={cg.client}
+                      client={cg.client}
+                      projects={cg.projects}
+                      canEdit={canEdit && !inArchive}
+                      density={density}
+                    />
+                  ))
+                : orderedGroups.map(([project, list]) => (
+                    <ProjectGroup
+                      key={project}
+                      project={project}
+                      items={list}
+                      meta={
+                        metaByProject.get(project) ?? defaultProjectMeta(project)
+                      }
+                      canEdit={canEdit && !inArchive}
+                      density={density}
+                      clientNames={clientNames}
+                    />
+                  ))}
             </div>
           </SortableContext>
         </DndContext>
@@ -390,6 +488,145 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
 
       <KeyboardHint canEdit={canEdit} />
     </section>
+  );
+}
+
+function GroupByToggle({
+  value,
+  onChange,
+}: {
+  value: GroupBy;
+  onChange: (next: GroupBy) => void;
+}) {
+  return (
+    <div
+      className="flex items-center gap-0.5 rounded-md border p-0.5"
+      role="group"
+      aria-label="Agrupar por"
+    >
+      {(
+        [
+          { v: "project", label: "Proyecto" },
+          { v: "client", label: "Cliente" },
+        ] as const
+      ).map(({ v, label }) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onChange(v)}
+          aria-pressed={value === v}
+          className={cn(
+            "rounded px-2 py-1 text-xs font-medium transition-colors",
+            value === v
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ClientManager({ clients }: { clients: Client[] }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = React.useState(false);
+  const [name, setName] = React.useState("");
+
+  const createMutation = useMutation({
+    mutationFn: async (n: string) => {
+      const result = await createClientAction(n);
+      if (!result.ok) throw new Error(result.message);
+      return result.data;
+    },
+    onSuccess: () => {
+      setName("");
+      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
+    },
+    onError: (err: Error) => showToast({ title: err.message }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (n: string) => {
+      const result = await deleteClientAction(n);
+      if (!result.ok) throw new Error(result.message);
+      return result.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY }),
+    onError: (err: Error) => showToast({ title: err.message }),
+  });
+
+  function add() {
+    const trimmed = name.trim();
+    if (trimmed) createMutation.mutate(trimmed);
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" size="sm" title="Clientes">
+          <Users />
+          Clientes
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 space-y-3">
+        <div className="text-sm font-medium">Clientes</div>
+        <div className="space-y-1">
+          {clients.length === 0 ? (
+            <p className="text-muted-foreground text-xs">
+              Todavía no hay clientes. Agregá el primero abajo.
+            </p>
+          ) : (
+            clients.map((c) => (
+              <div key={c.name} className="flex items-center gap-2">
+                <span className="flex-1 truncate text-sm">{c.name}</span>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="text-muted-foreground hover:text-destructive size-7"
+                  onClick={() => {
+                    if (
+                      confirm(
+                        `¿Quitar el cliente "${c.name}"? Los proyectos asignados quedan sin cliente.`,
+                      )
+                    )
+                      deleteMutation.mutate(c.name);
+                  }}
+                  aria-label={`Quitar ${c.name}`}
+                >
+                  <X className="size-3.5" />
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add();
+              }
+            }}
+            placeholder="Nuevo cliente…"
+            className="h-9"
+          />
+          <Button
+            type="button"
+            size="icon"
+            onClick={add}
+            disabled={!name.trim() || createMutation.isPending}
+            aria-label="Agregar cliente"
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

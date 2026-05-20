@@ -43,6 +43,7 @@ import {
   PROJECT_ITEM_STATUS_DOT,
   PROJECT_ITEM_STATUS_LABEL,
   defaultProjectMeta,
+  pickStableColor,
   type DensityMode,
   type ProjectColor,
   type ProjectItem,
@@ -64,6 +65,7 @@ type Props = {
   meta: ProjectMeta | undefined;
   canEdit: boolean;
   density: DensityMode;
+  clientNames?: string[];
   defaultOpen?: boolean;
 };
 
@@ -73,6 +75,7 @@ export function ProjectGroup({
   meta,
   canEdit,
   density,
+  clientNames = [],
   defaultOpen = true,
 }: Props) {
   const m = meta ?? defaultProjectMeta(project);
@@ -191,6 +194,8 @@ export function ProjectGroup({
               project={project}
               color={m.color as ProjectColor}
               emoji={m.emoji}
+              client={m.client ?? null}
+              clientNames={clientNames}
             />
           ) : null}
         </div>
@@ -319,10 +324,14 @@ function GroupMenu({
   project,
   color,
   emoji,
+  client,
+  clientNames,
 }: {
   project: string;
   color: ProjectColor;
   emoji: string | null;
+  client: string | null;
+  clientNames: string[];
 }) {
   const qc = useQueryClient();
 
@@ -347,6 +356,8 @@ function GroupMenu({
         project={project}
         color={color}
         emoji={emoji}
+        client={client}
+        clients={clientNames}
         trigger={
           <Button
             type="button"
@@ -390,5 +401,154 @@ function GroupMenu({
         </DropdownMenuContent>
       </DropdownMenu>
     </>
+  );
+}
+
+type ClientProject = {
+  project: string;
+  meta: ProjectMeta | undefined;
+  items: ProjectItem[];
+};
+
+export function ClientGroup({
+  client,
+  projects,
+  canEdit,
+  density,
+  defaultOpen = true,
+}: {
+  client: string;
+  projects: ClientProject[];
+  canEdit: boolean;
+  density: DensityMode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  const color = pickStableColor(client);
+  const palette = PROJECT_COLOR_CLASS[color];
+
+  const allItems = React.useMemo(
+    () => projects.flatMap((p) => p.items),
+    [projects],
+  );
+
+  const stats = React.useMemo(() => {
+    const counts: Record<ProjectItemStatus, number> = {
+      pending: 0,
+      ongoing: 0,
+      waiting: 0,
+      done: 0,
+    };
+    for (const it of allItems) counts[it.status]++;
+    return counts;
+  }, [allItems]);
+
+  const total = allItems.length;
+  const doneCount = stats.done;
+  const progress = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+
+  return (
+    <section className="bg-card overflow-hidden rounded-xl border shadow-sm">
+      <header
+        className={cn(
+          "flex items-center gap-2 border-b px-2 py-2.5 md:px-3",
+          palette.soft,
+        )}
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={() => setOpen((v) => !v)}
+          className="size-7 shrink-0"
+          aria-label={open ? "Colapsar" : "Expandir"}
+        >
+          <ChevronDown
+            className={cn(
+              "size-4 transition-transform",
+              open ? "rotate-0" : "-rotate-90",
+            )}
+          />
+        </Button>
+
+        <ProjectAvatar project={client} color={color} emoji={null} size="md" />
+
+        <h2 className="truncate text-sm font-semibold tracking-tight md:text-base">
+          {client}
+        </h2>
+
+        <span className="text-muted-foreground hidden text-[11px] tabular-nums sm:inline">
+          {projects.length} {projects.length === 1 ? "proyecto" : "proyectos"}
+        </span>
+
+        <div className="hidden items-center gap-1.5 pl-2 lg:flex">
+          {STATUS_ORDER.map((s) =>
+            stats[s] > 0 ? (
+              <span
+                key={s}
+                className="text-muted-foreground inline-flex items-center gap-1 text-[11px]"
+                title={PROJECT_ITEM_STATUS_LABEL[s]}
+              >
+                <span
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    PROJECT_ITEM_STATUS_DOT[s],
+                  )}
+                />
+                {stats[s]}
+              </span>
+            ) : null,
+          )}
+        </div>
+
+        <div className="ml-auto flex items-center gap-2">
+          <div className="text-muted-foreground hidden text-[11px] tabular-nums sm:block">
+            {doneCount}/{total}
+          </div>
+          <div className="bg-muted relative hidden h-1.5 w-20 overflow-hidden rounded-full md:block">
+            <div
+              className={cn("absolute inset-y-0 left-0", palette.bar)}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+      </header>
+
+      {open ? (
+        <div>
+          {projects.map(({ project, meta, items }) => {
+            const pm = meta ?? defaultProjectMeta(project);
+            return (
+              <div key={project}>
+                <div className="bg-muted/30 flex items-center gap-2 border-b px-3 py-1.5">
+                  <ProjectAvatar
+                    project={project}
+                    color={pm.color}
+                    emoji={pm.emoji}
+                    size="sm"
+                  />
+                  <span className="text-foreground/70 truncate text-xs font-semibold">
+                    {project}
+                  </span>
+                  <span className="text-muted-foreground ml-auto text-[11px] tabular-nums">
+                    {items.length}
+                  </span>
+                </div>
+                {items.map((item) => (
+                  <ProjectItemRow
+                    key={item.id}
+                    item={item}
+                    density={density}
+                    canEdit={canEdit}
+                    draggable={false}
+                  />
+                ))}
+                {canEdit ? <QuickAddRow project={project} /> : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </section>
   );
 }

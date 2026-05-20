@@ -126,6 +126,13 @@ export type ProjectMeta = {
   project: string;
   color: ProjectColor;
   emoji: string | null;
+  /** Client this project belongs to, or null/undefined if unassigned. */
+  client?: string | null;
+  position: number;
+};
+
+export type Client = {
+  name: string;
   position: number;
 };
 
@@ -212,6 +219,7 @@ export function defaultProjectMeta(project: string): ProjectMeta {
     project,
     color: pickStableColor(project),
     emoji: null,
+    client: null,
     position: 0,
   };
 }
