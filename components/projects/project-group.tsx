@@ -108,25 +108,25 @@ function ProjectName({
           }
         }}
         disabled={renameMutation.isPending}
-        className="h-7 w-48 max-w-full text-sm font-semibold md:text-base"
+        className="h-8 w-full text-sm font-semibold md:text-base"
       />
     );
   }
 
   if (!canEdit) {
     return (
-      <h2 className="truncate text-sm font-semibold tracking-tight md:text-base">
+      <h2 className="text-sm font-semibold tracking-tight break-words md:text-base">
         {project}
       </h2>
     );
   }
 
   return (
-    <h2 className="min-w-0 truncate">
+    <h2 className="min-w-0">
       <button
         type="button"
         onClick={beginEdit}
-        className="-mx-1 max-w-full cursor-text truncate rounded px-1 text-left text-sm font-semibold tracking-tight hover:bg-foreground/5 md:text-base"
+        className="-mx-1 w-full cursor-text rounded px-1 text-left text-sm font-semibold tracking-tight break-words hover:bg-foreground/5 md:text-base"
         title="Click para renombrar"
       >
         {project}
