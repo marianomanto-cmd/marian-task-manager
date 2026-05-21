@@ -355,7 +355,7 @@ function TitleCell({
             onClick={beginEdit}
             disabled={!canEdit}
             className={cn(
-              "truncate text-left text-sm font-medium",
+              "truncate text-left text-sm font-normal",
               done && "line-through opacity-70",
               !canEdit && "cursor-default",
               mobile && "whitespace-normal text-[15px] leading-snug",

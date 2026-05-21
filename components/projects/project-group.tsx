@@ -126,14 +126,14 @@ function ProjectName({
           }
         }}
         disabled={renameMutation.isPending}
-        className="h-8 w-full text-sm font-medium"
+        className="h-8 w-full text-sm font-semibold"
       />
     );
   }
 
   if (!canEdit) {
     return (
-      <h2 className="text-sm font-medium tracking-tight break-words">
+      <h2 className="text-sm font-semibold tracking-tight break-words">
         {project}
       </h2>
     );
@@ -144,7 +144,7 @@ function ProjectName({
       <button
         type="button"
         onClick={beginEdit}
-        className="-mx-1 w-full cursor-text rounded px-1 text-left text-sm font-medium tracking-tight break-words hover:bg-foreground/5"
+        className="-mx-1 w-full cursor-text rounded px-1 text-left text-sm font-semibold tracking-tight break-words hover:bg-foreground/5"
         title="Click para renombrar"
       >
         {project}
