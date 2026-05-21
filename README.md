@@ -5,11 +5,11 @@ App interna de la agencia. Dos pestañas:
 - **Mi board** (`/tasks`): tareas asignables a cualquier miembro del equipo. Cada uno usa su propio board si quiere (filtros "Sólo mías"). Visible para todo el equipo, sin notificaciones externas.
 - **Proyectos** (`/projects`): board de pendientes que Mariano comparte con clientes. Organizado por cliente → proyecto → tareas, con categoría, status, due date, link y nota. Creación top-down: elegís un cliente, creás sus proyectos, y dentro de cada proyecto cargás las tareas. Sólo Mariano edita; todo el equipo lo ve.
 - **Vista compartida** (`/p/<token>`): link público de sólo lectura para clientes. Se genera/rota/revoca desde el botón "Compartir" en Proyectos.
-- **Board - Mely** (`/boardmely`) y **Board - Yiss** (`/boardyiss`): copias independientes del board de Proyectos, una por clienta externa. Son **públicas y sin login** (se accede directo por el link), con edición completa. Usan "Grupos" en vez de "Clientes" y guardan sus datos en tablas aisladas (`mely_*` / `yiss_*`). No aparecen en el menú del equipo; sin sesión, la app manda a login (no ven `/projects` ni `/tasks`).
+- **Boards de clientas** — **Board - Mely** (`/boardmely`), **Board - Yiss** (`/boardyiss`) y **Board - Mafe** (`/boardmafe`): copias independientes del board de Proyectos, una por clienta externa. Son **públicas y sin login** (se accede directo por el link), con edición completa. Usan "Grupos" en vez de "Clientes" y guardan sus datos en tablas aisladas (`mely_*` / `yiss_*` / `mafe_*`). No aparecen en el menú del equipo; sin sesión, la app manda a login (no ven `/projects` ni `/tasks`).
 
 Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calendar, ni Slack.
 
-> Board - Mely y Board - Yiss requieren aplicar las migraciones `supabase/migrations/0021_mely_board.sql` y `0022_yiss_board.sql`.
+> Los boards de clientas requieren aplicar las migraciones `supabase/migrations/0021_mely_board.sql`, `0022_yiss_board.sql` y `0023_mafe_board.sql`.
 
 ### Proyectos: features clave
 
@@ -28,7 +28,7 @@ Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calen
 - Export CSV.
 - Atajos: `N` nuevo proyecto · `/` buscar · `A` toggle archivo.
 
-Board - Mely y Board - Yiss comparten estas features (con "Grupos" en lugar de "Clientes"); no incluyen el botón "Compartir" porque el board ya es el link público.
+Los boards de clientas (Mely, Yiss, Mafe) comparten estas features (con "Grupos" en lugar de "Clientes"); no incluyen el botón "Compartir" porque el board ya es el link público.
 
 ## Stack
 
