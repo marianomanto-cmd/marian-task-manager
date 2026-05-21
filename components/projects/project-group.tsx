@@ -273,6 +273,118 @@ type ClientProject = {
   items: ProjectItem[];
 };
 
+function ProjectBlock({
+  project,
+  meta,
+  items,
+  canEdit,
+  density,
+  clientNames,
+}: {
+  project: string;
+  meta: ProjectMeta | undefined;
+  items: ProjectItem[];
+  canEdit: boolean;
+  density: DensityMode;
+  clientNames: string[];
+}) {
+  const [open, setOpen] = React.useState(true);
+  const pm = meta ?? defaultProjectMeta(project);
+
+  const stats = React.useMemo(() => {
+    const counts: Record<ProjectItemStatus, number> = {
+      pending: 0,
+      ongoing: 0,
+      waiting: 0,
+      done: 0,
+    };
+    for (const it of items) counts[it.status]++;
+    return counts;
+  }, [items]);
+
+  return (
+    <div>
+      <div className="bg-muted/40 flex items-center gap-2 border-b px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="text-muted-foreground hover:text-foreground -ml-1 inline-flex size-6 shrink-0 items-center justify-center rounded"
+          aria-label={open ? "Colapsar proyecto" : "Expandir proyecto"}
+          aria-expanded={open}
+        >
+          <ChevronDown
+            className={cn(
+              "size-3.5 transition-transform",
+              open ? "rotate-0" : "-rotate-90",
+            )}
+          />
+        </button>
+        <ProjectAvatar
+          project={project}
+          color={pm.color}
+          emoji={pm.emoji}
+          size="sm"
+        />
+        <div className="min-w-0 flex-1">
+          <ProjectName project={project} canEdit={canEdit} />
+        </div>
+        {!open ? (
+          <div className="hidden items-center gap-1.5 sm:flex">
+            {STATUS_ORDER.map((s) =>
+              stats[s] > 0 ? (
+                <span
+                  key={s}
+                  className="text-muted-foreground inline-flex items-center gap-1 text-[11px]"
+                  title={PROJECT_ITEM_STATUS_LABEL[s]}
+                >
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      PROJECT_ITEM_STATUS_DOT[s],
+                    )}
+                  />
+                  {stats[s]}
+                </span>
+              ) : null,
+            )}
+          </div>
+        ) : null}
+        <span className="text-muted-foreground text-[11px] tabular-nums">
+          {items.length}
+        </span>
+        {canEdit ? (
+          <GroupMenu
+            project={project}
+            color={pm.color}
+            emoji={pm.emoji}
+            client={pm.client ?? null}
+            clientNames={clientNames}
+          />
+        ) : null}
+      </div>
+      {open ? (
+        <>
+          <SortableContext
+            items={items.map((it) => it.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            {items.map((item) => (
+              <ProjectItemRow
+                key={item.id}
+                item={item}
+                density={density}
+                canEdit={canEdit}
+                draggable={canEdit}
+              />
+            ))}
+          </SortableContext>
+          {canEdit ? <QuickAddRow project={project} /> : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export function ClientGroup({
   clientKey,
   client,
@@ -385,51 +497,17 @@ export function ClientGroup({
 
       {open ? (
         <div>
-          {projects.map(({ project, meta, items }) => {
-            const pm = meta ?? defaultProjectMeta(project);
-            return (
-              <div key={project}>
-                <div className="bg-muted/40 flex items-center gap-2 border-b px-3 py-2">
-                  <ProjectAvatar
-                    project={project}
-                    color={pm.color}
-                    emoji={pm.emoji}
-                    size="sm"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <ProjectName project={project} canEdit={canEdit} />
-                  </div>
-                  <span className="text-muted-foreground text-[11px] tabular-nums">
-                    {items.length}
-                  </span>
-                  {canEdit ? (
-                    <GroupMenu
-                      project={project}
-                      color={pm.color}
-                      emoji={pm.emoji}
-                      client={pm.client ?? null}
-                      clientNames={clientNames}
-                    />
-                  ) : null}
-                </div>
-                <SortableContext
-                  items={items.map((it) => it.id)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {items.map((item) => (
-                    <ProjectItemRow
-                      key={item.id}
-                      item={item}
-                      density={density}
-                      canEdit={canEdit}
-                      draggable={canEdit}
-                    />
-                  ))}
-                </SortableContext>
-                {canEdit ? <QuickAddRow project={project} /> : null}
-              </div>
-            );
-          })}
+          {projects.map(({ project, meta, items }) => (
+            <ProjectBlock
+              key={project}
+              project={project}
+              meta={meta}
+              items={items}
+              canEdit={canEdit}
+              density={density}
+              clientNames={clientNames}
+            />
+          ))}
           {canEdit && onNewProject ? (
             <button
               type="button"
