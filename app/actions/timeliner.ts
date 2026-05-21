@@ -127,14 +127,18 @@ export async function getTimelinerAction(): Promise<
     ]);
     if (timelinesRes.error) throw new Error(timelinesRes.error.message);
     if (itemsRes.error) throw new Error(itemsRes.error.message);
-    if (holidaysRes.error) throw new Error(holidaysRes.error.message);
+    // Holidays are optional decoration; if the table hasn't been created
+    // (migration 0006), skip the overlay rather than breaking the board.
+    const holidays = holidaysRes.error
+      ? []
+      : ((holidaysRes.data ?? []) as Holiday[]);
 
     return {
       ok: true,
       data: {
         timelines: (timelinesRes.data ?? []) as Timeline[],
         items: (itemsRes.data ?? []) as TimelineItem[],
-        holidays: (holidaysRes.data ?? []) as Holiday[],
+        holidays,
       },
     };
   } catch (err) {
