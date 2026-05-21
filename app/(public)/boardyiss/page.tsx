@@ -25,7 +25,7 @@ export default function BoardYissPage() {
           </div>
         </div>
       </header>
-      <main className="flex-1">
+      <main className="flex-1 pb-[env(safe-area-inset-bottom)]">
         <YissBoard />
       </main>
     </>

@@ -206,8 +206,19 @@ export function ProjectItemRow({
       </div>
 
       {/* Mobile card layout */}
-      <div className="flex flex-col gap-2 pl-3 pr-2 py-3 md:hidden">
-        <div className="flex items-start gap-2">
+      <div className="flex flex-col gap-2 pl-2 pr-2 py-3 md:hidden">
+        <div className="flex items-start gap-1.5">
+          {canEdit && draggable ? (
+            <button
+              type="button"
+              {...sortable.attributes}
+              {...sortable.listeners}
+              className="text-muted-foreground/50 -ml-0.5 mt-0.5 flex size-8 shrink-0 touch-none items-center justify-center rounded active:bg-accent active:cursor-grabbing"
+              aria-label="Mantené presionado para arrastrar"
+            >
+              <GripVertical className="size-4" />
+            </button>
+          ) : null}
           <TitleCell
             value={item.title}
             description={item.description}
@@ -493,7 +504,7 @@ function CategoryCell({
   const chip = (
     <span
       className={cn(
-        "inline-flex h-6 items-center justify-center rounded-full border px-2 text-[10px] font-semibold uppercase tracking-wide",
+        "inline-flex h-8 items-center justify-center rounded-full border px-2.5 text-[10px] font-semibold uppercase tracking-wide md:h-6 md:px-2",
         PROJECT_ITEM_CATEGORY_CLASS[value],
       )}
     >
@@ -540,7 +551,7 @@ function StatusCell({
   const chip = (
     <span
       className={cn(
-        "inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium",
+        "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium md:h-6 md:px-2",
         PROJECT_ITEM_STATUS_CLASS[value],
       )}
     >
@@ -598,7 +609,7 @@ function DueDateCell({
   const chip = (
     <span
       className={cn(
-        "inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium",
+        "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium md:h-6 md:px-2",
         tone,
       )}
     >
@@ -739,7 +750,7 @@ function RowMenu({
           type="button"
           size="icon"
           variant="ghost"
-          className="size-7 opacity-60 group-hover:opacity-100 md:opacity-0"
+          className="size-8 opacity-60 group-hover:opacity-100 md:size-7 md:opacity-0"
           aria-label="Acciones"
         >
           <MoreHorizontal className="size-3.5" />

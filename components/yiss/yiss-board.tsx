@@ -4,7 +4,8 @@ import * as React from "react";
 import {
   DndContext,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   useSensor,
   useSensors,
@@ -17,6 +18,7 @@ import {
   Download,
   FolderPlus,
   Layers,
+  MoreHorizontal,
   Plus,
   Search,
   SlidersHorizontal,
@@ -38,6 +40,12 @@ import {
 import { FilterChips } from "@/components/tasks/filter-chips";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverContent,
@@ -221,7 +229,12 @@ export function YissBoard() {
   );
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    // On touch, require a short press-and-hold before dragging so vertical
+    // swipes scroll the list instead of accidentally reordering tasks.
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 6 },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     }),
@@ -336,40 +349,79 @@ export function YissBoard() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar… (/)"
-              className="h-9 w-40 pl-7 md:w-56"
+              className="h-9 w-36 pl-7 sm:w-44 md:w-56"
             />
           </div>
-          <Button
-            type="button"
-            variant={inArchive ? "default" : "outline"}
-            size="sm"
-            onClick={() => setView(inArchive ? "active" : "archive")}
-            title="Archivo (A)"
-          >
-            <Archive />
-            {inArchive ? "Volver" : "Archivo"}
-          </Button>
-          <Button
-            type="button"
-            variant={showFilters ? "outline" : "default"}
-            size="sm"
-            onClick={() => setShowFilters((v) => !v)}
-            title={showFilters ? "Ocultar filtros" : "Mostrar filtros"}
-          >
-            <SlidersHorizontal />
-            Filtros
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={exportCsv}
-            disabled={items.length === 0}
-            title="Exportar CSV"
-          >
-            <Download />
-            CSV
-          </Button>
+
+          {/* Desktop toolbar */}
+          <div className="hidden items-center gap-1.5 md:flex">
+            <Button
+              type="button"
+              variant={inArchive ? "default" : "outline"}
+              size="sm"
+              onClick={() => setView(inArchive ? "active" : "archive")}
+              title="Archivo (A)"
+            >
+              <Archive />
+              {inArchive ? "Volver" : "Archivo"}
+            </Button>
+            <Button
+              type="button"
+              variant={showFilters ? "outline" : "default"}
+              size="sm"
+              onClick={() => setShowFilters((v) => !v)}
+              title={showFilters ? "Ocultar filtros" : "Mostrar filtros"}
+            >
+              <SlidersHorizontal />
+              Filtros
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={exportCsv}
+              disabled={items.length === 0}
+              title="Exportar CSV"
+            >
+              <Download />
+              CSV
+            </Button>
+          </div>
+
+          {/* Mobile: collapse secondary actions into an overflow menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="md:hidden"
+                aria-label="Más acciones"
+              >
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => setView(inArchive ? "active" : "archive")}
+              >
+                <Archive className="size-4" />
+                {inArchive ? "Volver al activo" : "Ver archivo"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowFilters((v) => !v)}>
+                <SlidersHorizontal className="size-4" />
+                {showFilters ? "Ocultar filtros" : "Mostrar filtros"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={exportCsv}
+                disabled={items.length === 0}
+              >
+                <Download className="size-4" />
+                Exportar CSV
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {!inArchive ? (
             <Button
               type="button"
@@ -377,7 +429,8 @@ export function YissBoard() {
               title="Nuevo proyecto (N)"
             >
               <FolderPlus />
-              Nuevo proyecto
+              <span className="hidden sm:inline">Nuevo proyecto</span>
+              <span className="sm:hidden">Nuevo</span>
             </Button>
           ) : null}
         </div>

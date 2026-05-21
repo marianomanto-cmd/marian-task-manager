@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 
 import { QueryProvider } from "@/components/query-provider";
@@ -19,6 +19,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Agency Board",
   description: "Bandeja AI y task board para la agencia.",
+};
+
+export const viewport: Viewport = {
+  // Let CSS env(safe-area-inset-*) report real values on notched devices.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

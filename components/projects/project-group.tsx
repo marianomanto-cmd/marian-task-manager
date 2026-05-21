@@ -336,7 +336,7 @@ function ProjectBlock({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="text-muted-foreground hover:text-foreground -ml-1 inline-flex size-6 shrink-0 items-center justify-center rounded"
+          className="text-muted-foreground hover:text-foreground -ml-1 inline-flex size-7 shrink-0 items-center justify-center rounded md:size-6"
           aria-label={open ? "Colapsar proyecto" : "Expandir proyecto"}
           aria-expanded={open}
         >
@@ -491,7 +491,7 @@ export function ClientGroup({
           variant="ghost"
           size="icon"
           onClick={() => setOpen((v) => !v)}
-          className="size-7 shrink-0"
+          className="size-8 shrink-0 md:size-7"
           aria-label={open ? "Colapsar" : "Expandir"}
         >
           <ChevronDown
