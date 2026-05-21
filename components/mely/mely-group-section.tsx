@@ -126,14 +126,14 @@ function ProjectName({
           }
         }}
         disabled={renameMutation.isPending}
-        className="h-8 w-full text-sm font-semibold md:text-base"
+        className="h-8 w-full text-sm font-medium"
       />
     );
   }
 
   if (!canEdit) {
     return (
-      <h2 className="text-sm font-semibold tracking-tight break-words md:text-base">
+      <h2 className="text-sm font-medium tracking-tight break-words">
         {project}
       </h2>
     );
@@ -144,7 +144,7 @@ function ProjectName({
       <button
         type="button"
         onClick={beginEdit}
-        className="-mx-1 w-full cursor-text rounded px-1 text-left text-sm font-semibold tracking-tight break-words hover:bg-foreground/5 md:text-base"
+        className="-mx-1 w-full cursor-text rounded px-1 text-left text-sm font-medium tracking-tight break-words hover:bg-foreground/5"
         title="Click para renombrar"
       >
         {project}
@@ -330,13 +330,24 @@ function ProjectBlock({
     onError: (err: Error) => showToast({ title: err.message }),
   });
 
+  const palette = MELY_COLOR_CLASS[pm.color];
+
   return (
     <div>
-      <div className="bg-muted/40 flex items-center gap-2 border-b px-3 py-2">
+      <div
+        className={cn(
+          "relative flex items-center gap-2 border-b py-2 pr-3 pl-4",
+          palette.soft,
+        )}
+      >
+        <span
+          aria-hidden
+          className={cn("absolute inset-y-0 left-0 w-[3px]", palette.bar)}
+        />
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="text-muted-foreground hover:text-foreground -ml-1 inline-flex size-7 shrink-0 items-center justify-center rounded md:size-6"
+          className="text-muted-foreground hover:text-foreground inline-flex size-7 shrink-0 items-center justify-center rounded md:size-6"
           aria-label={open ? "Colapsar proyecto" : "Expandir proyecto"}
           aria-expanded={open}
         >
@@ -409,7 +420,7 @@ function ProjectBlock({
         ) : null}
       </div>
       {open ? (
-        <>
+        <div className="animate-in fade-in-0 slide-in-from-top-1 duration-150">
           <SortableContext
             items={items.map((it) => it.id)}
             strategy={verticalListSortingStrategy}
@@ -425,7 +436,7 @@ function ProjectBlock({
             ))}
           </SortableContext>
           {canEdit ? <MelyQuickAddRow project={project} /> : null}
-        </>
+        </div>
       ) : null}
     </div>
   );
@@ -482,7 +493,7 @@ export function MelyGroupSection({
     <section className="bg-card overflow-hidden rounded-xl border shadow-sm">
       <header
         className={cn(
-          "flex items-center gap-2 border-b px-2 py-2.5 md:px-3",
+          "flex items-center gap-2.5 border-b px-3 py-3 md:px-4",
           palette.soft,
         )}
       >
@@ -504,7 +515,7 @@ export function MelyGroupSection({
 
         <MelyAvatar project={group} color={color} emoji={null} size="md" />
 
-        <h2 className="truncate text-sm font-semibold tracking-tight md:text-base">
+        <h2 className="truncate text-base font-semibold tracking-tight md:text-lg">
           {group}
         </h2>
 
@@ -546,7 +557,7 @@ export function MelyGroupSection({
       </header>
 
       {open ? (
-        <div>
+        <div className="animate-in fade-in-0 duration-150">
           {projects.map(({ project, meta, items }) => (
             <ProjectBlock
               key={project}

@@ -55,7 +55,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { showToast } from "@/components/ui/toast";
 import {
   MELY_ITEM_CATEGORIES,
-  MELY_ITEM_CATEGORY_CLASS,
+  MELY_ITEM_CATEGORY_DOT,
   MELY_ITEM_CATEGORY_LABEL,
   MELY_ITEM_STATUSES,
   MELY_ITEM_STATUS_BAR,
@@ -132,7 +132,7 @@ export function MelyItemRow({
       ref={sortable.setNodeRef}
       style={style}
       className={cn(
-        "group relative border-b last:border-b-0 transition-colors",
+        "group relative border-b transition-colors last:border-b-0 hover:bg-muted/40",
         sortable.isOver && "bg-accent/30",
         isDone && "text-muted-foreground",
       )}
@@ -151,8 +151,8 @@ export function MelyItemRow({
           "hidden gap-3 pl-4 pr-2 md:grid md:items-center",
           padY,
           density === "compact"
-            ? "md:grid-cols-[16px_1fr_110px_120px_120px_36px]"
-            : "md:grid-cols-[16px_1fr_130px_130px_130px_36px]",
+            ? "md:grid-cols-[16px_1fr_40px_120px_120px_36px]"
+            : "md:grid-cols-[16px_1fr_44px_130px_130px_36px]",
         )}
       >
         {canEdit && draggable ? (
@@ -501,24 +501,37 @@ function CategoryCell({
   canEdit: boolean;
   onChange: (next: MelyItemCategory) => void;
 }) {
-  const chip = (
-    <span
-      className={cn(
-        "inline-flex h-8 items-center justify-center rounded-full border px-2.5 text-[10px] font-semibold uppercase tracking-wide md:h-6 md:px-2",
-        MELY_ITEM_CATEGORY_CLASS[value],
-      )}
-    >
-      {MELY_ITEM_CATEGORY_LABEL[value]}
-    </span>
+  const content = (
+    <>
+      <span
+        className={cn("size-2.5 rounded-full", MELY_ITEM_CATEGORY_DOT[value])}
+      />
+      <span className="text-muted-foreground text-xs md:hidden">
+        {MELY_ITEM_CATEGORY_LABEL[value]}
+      </span>
+    </>
   );
 
-  if (!canEdit) return chip;
+  if (!canEdit)
+    return (
+      <span
+        className="flex h-8 items-center gap-1.5 md:h-6 md:justify-center"
+        title={MELY_ITEM_CATEGORY_LABEL[value]}
+      >
+        {content}
+      </span>
+    );
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="text-left">
-          {chip}
+        <button
+          type="button"
+          className="flex h-8 items-center gap-1.5 md:h-6 md:justify-center"
+          title={MELY_ITEM_CATEGORY_LABEL[value]}
+          aria-label={`Categoría: ${MELY_ITEM_CATEGORY_LABEL[value]}`}
+        >
+          {content}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
@@ -526,8 +539,8 @@ function CategoryCell({
           <DropdownMenuItem key={c} onClick={() => onChange(c)}>
             <span
               className={cn(
-                "mr-2 inline-block size-2 rounded-full border",
-                MELY_ITEM_CATEGORY_CLASS[c],
+                "mr-2 inline-block size-2 rounded-full",
+                MELY_ITEM_CATEGORY_DOT[c],
               )}
             />
             {MELY_ITEM_CATEGORY_LABEL[c]}

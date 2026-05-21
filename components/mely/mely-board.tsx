@@ -329,7 +329,7 @@ export function MelyBoard() {
     categories.length !== MELY_ITEM_CATEGORIES.length;
 
   return (
-    <section className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
+    <section className="mx-auto flex w-full max-w-[80rem] flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
@@ -837,7 +837,10 @@ function GroupEmptyState({
   onNewProject: () => void;
 }) {
   return (
-    <div className="bg-muted/30 flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center">
+    <div className="bg-muted/20 flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-16 text-center">
+      <div className="bg-muted text-muted-foreground flex size-12 items-center justify-center rounded-full">
+        <FolderPlus className="size-6" />
+      </div>
       <div>
         <p className="text-sm font-medium">
           «{group}» todavía no tiene proyectos
@@ -861,22 +864,28 @@ function EmptyState({
   hasItems: boolean;
   archive: boolean;
 }) {
+  const Icon = hasItems ? Search : archive ? Archive : FolderPlus;
   return (
-    <div className="bg-muted/30 flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-16 text-center">
-      <p className="text-sm font-medium">
-        {hasItems
-          ? "Sin resultados con estos filtros"
-          : archive
-            ? "Nada archivado todavía"
-            : "Sin proyectos todavía"}
-      </p>
-      <p className="text-muted-foreground text-xs">
-        {hasItems
-          ? "Probá quitar filtros o limpiar la búsqueda."
-          : archive
-            ? "Cuando archives tareas las vas a ver acá."
-            : "Tocá Nuevo proyecto o presioná N para arrancar."}
-      </p>
+    <div className="bg-muted/20 flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-16 text-center">
+      <div className="bg-muted text-muted-foreground flex size-12 items-center justify-center rounded-full">
+        <Icon className="size-6" />
+      </div>
+      <div>
+        <p className="text-sm font-medium">
+          {hasItems
+            ? "Sin resultados con estos filtros"
+            : archive
+              ? "Nada archivado todavía"
+              : "Sin proyectos todavía"}
+        </p>
+        <p className="text-muted-foreground text-xs">
+          {hasItems
+            ? "Probá quitar filtros o limpiar la búsqueda."
+            : archive
+              ? "Cuando archives tareas las vas a ver acá."
+              : "Tocá Nuevo proyecto o presioná N para arrancar."}
+        </p>
+      </div>
     </div>
   );
 }

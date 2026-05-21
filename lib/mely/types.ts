@@ -91,6 +91,15 @@ export const MELY_ITEM_CATEGORY_CLASS: Record<MelyItemCategory, string> = {
   otros: "bg-muted text-muted-foreground border-border",
 };
 
+/** Solid dot color per category, for the low-noise category indicator. */
+export const MELY_ITEM_CATEGORY_DOT: Record<MelyItemCategory, string> = {
+  mp: "bg-violet-500",
+  trafico: "bg-amber-500",
+  creativo: "bg-fuchsia-500",
+  reporting: "bg-teal-500",
+  otros: "bg-muted-foreground/40",
+};
+
 export type MelyColor =
   | "slate"
   | "sky"

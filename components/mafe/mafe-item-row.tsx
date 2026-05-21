@@ -55,7 +55,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { showToast } from "@/components/ui/toast";
 import {
   MAFE_ITEM_CATEGORIES,
-  MAFE_ITEM_CATEGORY_CLASS,
+  MAFE_ITEM_CATEGORY_DOT,
   MAFE_ITEM_CATEGORY_LABEL,
   MAFE_ITEM_STATUSES,
   MAFE_ITEM_STATUS_BAR,
@@ -132,7 +132,7 @@ export function MafeItemRow({
       ref={sortable.setNodeRef}
       style={style}
       className={cn(
-        "group relative border-b last:border-b-0 transition-colors",
+        "group relative border-b transition-colors last:border-b-0 hover:bg-muted/40",
         sortable.isOver && "bg-accent/30",
         isDone && "text-muted-foreground",
       )}
@@ -151,8 +151,8 @@ export function MafeItemRow({
           "hidden gap-3 pl-4 pr-2 md:grid md:items-center",
           padY,
           density === "compact"
-            ? "md:grid-cols-[16px_1fr_110px_120px_120px_36px]"
-            : "md:grid-cols-[16px_1fr_130px_130px_130px_36px]",
+            ? "md:grid-cols-[16px_1fr_40px_120px_120px_36px]"
+            : "md:grid-cols-[16px_1fr_44px_130px_130px_36px]",
         )}
       >
         {canEdit && draggable ? (
@@ -501,24 +501,37 @@ function CategoryCell({
   canEdit: boolean;
   onChange: (next: MafeItemCategory) => void;
 }) {
-  const chip = (
-    <span
-      className={cn(
-        "inline-flex h-8 items-center justify-center rounded-full border px-2.5 text-[10px] font-semibold uppercase tracking-wide md:h-6 md:px-2",
-        MAFE_ITEM_CATEGORY_CLASS[value],
-      )}
-    >
-      {MAFE_ITEM_CATEGORY_LABEL[value]}
-    </span>
+  const content = (
+    <>
+      <span
+        className={cn("size-2.5 rounded-full", MAFE_ITEM_CATEGORY_DOT[value])}
+      />
+      <span className="text-muted-foreground text-xs md:hidden">
+        {MAFE_ITEM_CATEGORY_LABEL[value]}
+      </span>
+    </>
   );
 
-  if (!canEdit) return chip;
+  if (!canEdit)
+    return (
+      <span
+        className="flex h-8 items-center gap-1.5 md:h-6 md:justify-center"
+        title={MAFE_ITEM_CATEGORY_LABEL[value]}
+      >
+        {content}
+      </span>
+    );
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="text-left">
-          {chip}
+        <button
+          type="button"
+          className="flex h-8 items-center gap-1.5 md:h-6 md:justify-center"
+          title={MAFE_ITEM_CATEGORY_LABEL[value]}
+          aria-label={`Categoría: ${MAFE_ITEM_CATEGORY_LABEL[value]}`}
+        >
+          {content}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
@@ -526,8 +539,8 @@ function CategoryCell({
           <DropdownMenuItem key={c} onClick={() => onChange(c)}>
             <span
               className={cn(
-                "mr-2 inline-block size-2 rounded-full border",
-                MAFE_ITEM_CATEGORY_CLASS[c],
+                "mr-2 inline-block size-2 rounded-full",
+                MAFE_ITEM_CATEGORY_DOT[c],
               )}
             />
             {MAFE_ITEM_CATEGORY_LABEL[c]}
