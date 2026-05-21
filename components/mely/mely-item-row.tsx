@@ -125,7 +125,7 @@ export function MelyItemRow({
     onError: (err: Error) => showToast({ title: err.message }),
   });
 
-  const padY = density === "compact" ? "py-1.5" : "py-2.5";
+  const padY = density === "compact" ? "py-1" : "py-1.5";
 
   return (
     <div
