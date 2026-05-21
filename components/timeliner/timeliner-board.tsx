@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { format } from "date-fns";
+import { addDays, format } from "date-fns";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarRange,
   Download,
   Flag,
+  Layers,
   ListTodo,
   Pencil,
   Plus,
@@ -15,6 +16,8 @@ import {
 
 import {
   createTimelineAction,
+  createTimelineGroupAction,
+  createTimelineItemAction,
   deleteTimelineAction,
   renameTimelineAction,
   updateTimelineSettingsAction,
@@ -58,6 +61,10 @@ export function TimelinerBoard() {
     () => query.data?.data.holidays ?? [],
     [query.data?.data.holidays],
   );
+  const allGroups = React.useMemo(
+    () => query.data?.data.groups ?? [],
+    [query.data?.data.groups],
+  );
 
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const selected =
@@ -67,6 +74,31 @@ export function TimelinerBoard() {
     () => (selected ? allItems.filter((i) => i.timeline_id === selected.id) : []),
     [allItems, selected],
   );
+  const groups = React.useMemo(
+    () => (selected ? allGroups.filter((g) => g.timeline_id === selected.id) : []),
+    [allGroups, selected],
+  );
+
+  const quickAddMutation = useMutation({
+    mutationFn: async () => {
+      if (!selected) throw new Error("Sin timeline");
+      const start = format(new Date(), "yyyy-MM-dd");
+      const end = format(addDays(new Date(), 2), "yyyy-MM-dd");
+      const res = await createTimelineItemAction({
+        timeline_id: selected.id,
+        group_id: null,
+        title: "Nueva tarea",
+        owner_key: null,
+        start_date: start,
+        end_date: end,
+        kind: "task",
+      });
+      if (!res.ok) throw new Error(res.message);
+      return res.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: TIMELINER_KEY }),
+    onError: (err: Error) => showToast({ title: err.message }),
+  });
 
   // Item editor (create / edit), remounted per open so fields reset.
   const [editorOpen, setEditorOpen] = React.useState(false);
@@ -154,6 +186,7 @@ export function TimelinerBoard() {
               <Flag />
               Hito
             </Button>
+            <NewGroupPopover timelineId={selected.id} />
             <Button
               type="button"
               size="sm"
@@ -250,18 +283,11 @@ export function TimelinerBoard() {
                   }}
                   className={cn(
                     "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors",
-                    on
-                      ? "border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-200"
-                      : "bg-background hover:bg-accent",
+                    on ? c.chip : "bg-background hover:bg-accent",
                   )}
                   aria-pressed={on}
                 >
-                  <span
-                    className={cn(
-                      "size-2 rounded-full",
-                      on ? "bg-rose-500" : "bg-muted-foreground/30",
-                    )}
-                  />
+                  <span className={cn("size-2 rounded-full", c.dot)} />
                   {c.label}
                 </button>
               );
@@ -286,12 +312,24 @@ export function TimelinerBoard() {
       ) : !selected ? (
         <EmptyTimelines onCreated={(id) => setSelectedId(id)} />
       ) : (
-        <GanttChart
-          timeline={selected}
-          items={items}
-          holidays={holidays}
-          onEditItem={(item) => openEditor(item)}
-        />
+        <>
+          <GanttChart
+            timeline={selected}
+            groups={groups}
+            items={items}
+            holidays={holidays}
+            onEditItem={(item) => openEditor(item)}
+          />
+          <button
+            type="button"
+            onClick={() => quickAddMutation.mutate()}
+            disabled={quickAddMutation.isPending}
+            className="text-muted-foreground hover:text-foreground hover:bg-accent/50 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed py-2.5 text-sm transition-colors"
+          >
+            <Plus className="size-4" />
+            Agregar tarea rápida
+          </button>
+        </>
       )}
 
       {selected ? (
@@ -300,6 +338,7 @@ export function TimelinerBoard() {
           open={editorOpen}
           onOpenChange={setEditorOpen}
           timelineId={selected.id}
+          groups={groups}
           item={editorItem}
           defaultStart={today}
           defaultKind={editorKind}
@@ -369,6 +408,69 @@ function NewTimelinePopover({ onCreated }: { onCreated: (id: string) => void }) 
             onClick={add}
             disabled={!name.trim() || createMutation.isPending}
             aria-label="Crear"
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function NewGroupPopover({ timelineId }: { timelineId: string }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = React.useState(false);
+  const [name, setName] = React.useState("");
+
+  const createMutation = useMutation({
+    mutationFn: async (n: string) => {
+      const res = await createTimelineGroupAction({ timeline_id: timelineId, name: n });
+      if (!res.ok) throw new Error(res.message);
+      return res.data;
+    },
+    onSuccess: () => {
+      setName("");
+      setOpen(false);
+      qc.invalidateQueries({ queryKey: TIMELINER_KEY });
+    },
+    onError: (err: Error) => showToast({ title: err.message }),
+  });
+
+  function add() {
+    const trimmed = name.trim();
+    if (trimmed) createMutation.mutate(trimmed);
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" size="sm" variant="outline">
+          <Layers />
+          Grupo
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 space-y-2">
+        <div className="text-xs font-medium">Nuevo grupo</div>
+        <div className="flex items-center gap-2">
+          <Input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add();
+              }
+            }}
+            placeholder="Ej: Pre-producción"
+            className="h-9"
+          />
+          <Button
+            type="button"
+            size="icon"
+            onClick={add}
+            disabled={!name.trim() || createMutation.isPending}
+            aria-label="Crear grupo"
           >
             <Plus className="size-3.5" />
           </Button>

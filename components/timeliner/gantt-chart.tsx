@@ -17,36 +17,65 @@ import {
 } from "date-fns";
 import { es } from "date-fns/locale";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Trash2 } from "lucide-react";
 
-import { updateTimelineItemAction } from "@/app/actions/timeliner";
+import {
+  deleteTimelineGroupAction,
+  renameTimelineGroupAction,
+  updateTimelineItemAction,
+} from "@/app/actions/timeliner";
 import { OwnerDot } from "@/components/timeliner/owner-picker";
 import { TIMELINER_KEY } from "@/components/timeliner/use-timeliner";
+import { Input } from "@/components/ui/input";
 import { showToast } from "@/components/ui/toast";
-import { colorForMemberKey, getMemberByKey } from "@/lib/team/members";
-import type { Holiday, Timeline, TimelineItem } from "@/lib/timeliner/types";
+import {
+  HOLIDAY_COUNTRIES,
+  ownerInfo,
+  type Holiday,
+  type HolidayCountry,
+  type Timeline,
+  type TimelineGroup,
+  type TimelineItem,
+} from "@/lib/timeliner/types";
 import { cn } from "@/lib/utils";
 
 const DAY_W = 32;
 const ROW_H = 40;
+const GROUP_H = 30;
 const LEFT_W = 288;
 
+const WEEKEND_HEADER = "bg-slate-500/25";
+const WEEKEND_BODY = "bg-slate-500/15";
+const TODAY_HEADER = "bg-sky-400/30";
+const TODAY_BODY = "bg-sky-400/15";
+const TODAY_TEXT = "text-sky-600 dark:text-sky-300 font-bold";
+
 const WEEKDAY = ["D", "L", "M", "M", "J", "V", "S"];
+
+/** First country (in list order) with a holiday on this date. */
+function firstHolidayColor(countries: string[]): HolidayCountry | null {
+  for (const c of HOLIDAY_COUNTRIES) if (countries.includes(c.code)) return c;
+  return null;
+}
 
 type Preview = { id: string; start: string; end: string } | null;
 
 function ownerColors(ownerKey: string | null) {
-  if (!ownerKey) return { barBg: "bg-slate-400", barText: "text-white" };
-  const c = colorForMemberKey(ownerKey);
-  return { barBg: c.barBg, barText: c.barText };
+  const info = ownerInfo(ownerKey);
+  return info
+    ? { barBg: info.barBg, barText: info.barText }
+    : { barBg: "bg-slate-400", barText: "text-white" };
 }
 
 export function GanttChart({
   timeline,
+  groups,
   items,
   holidays,
   onEditItem,
 }: {
   timeline: Timeline;
+  groups: TimelineGroup[];
   items: TimelineItem[];
   holidays: Holiday[];
   onEditItem: (item: TimelineItem) => void;
@@ -82,12 +111,13 @@ export function GanttChart({
   const gridWidth = days.length * DAY_W;
 
   const holidayByDate = React.useMemo(() => {
-    const m = new Map<string, string[]>();
+    const m = new Map<string, { countries: string[]; names: string[] }>();
     for (const h of holidays) {
       if (!timeline.holiday_countries.includes(h.country)) continue;
-      const arr = m.get(h.date) ?? [];
-      arr.push(`${h.country}: ${h.name}`);
-      m.set(h.date, arr);
+      const entry = m.get(h.date) ?? { countries: [], names: [] };
+      entry.countries.push(h.country);
+      entry.names.push(`${h.country}: ${h.name}`);
+      m.set(h.date, entry);
     }
     return m;
   }, [holidays, timeline.holiday_countries]);
@@ -109,6 +139,37 @@ export function GanttChart({
     }
     return segs;
   }, [days]);
+
+  // Ordered render rows: group headers interleaved with their items. With no
+  // groups, items render flat.
+  const rows = React.useMemo(() => {
+    type Row =
+      | { type: "group"; group: TimelineGroup | null; count: number }
+      | { type: "item"; item: TimelineItem };
+    const out: Row[] = [];
+    const byGroup = new Map<string | null, TimelineItem[]>();
+    for (const it of items) {
+      const k = it.group_id ?? null;
+      if (!byGroup.has(k)) byGroup.set(k, []);
+      byGroup.get(k)!.push(it);
+    }
+    const sortedGroups = [...groups].sort((a, b) => a.position - b.position);
+    if (sortedGroups.length === 0) {
+      for (const it of items) out.push({ type: "item", item: it });
+      return out;
+    }
+    for (const g of sortedGroups) {
+      const list = byGroup.get(g.id) ?? [];
+      out.push({ type: "group", group: g, count: list.length });
+      for (const it of list) out.push({ type: "item", item: it });
+    }
+    const ungrouped = byGroup.get(null) ?? [];
+    if (ungrouped.length > 0) {
+      out.push({ type: "group", group: null, count: ungrouped.length });
+      for (const it of ungrouped) out.push({ type: "item", item: it });
+    }
+    return out;
+  }, [items, groups]);
 
   function startDrag(
     e: React.PointerEvent,
@@ -168,7 +229,6 @@ export function GanttChart({
       <div style={{ width: LEFT_W + gridWidth, minWidth: "100%" }}>
         {/* Header */}
         <div className="bg-card sticky top-0 z-20">
-          {/* Month band */}
           <div className="flex border-b">
             <div
               className="bg-card text-muted-foreground sticky left-0 z-30 shrink-0 border-r px-3 py-1.5 text-xs font-semibold"
@@ -188,7 +248,6 @@ export function GanttChart({
               ))}
             </div>
           </div>
-          {/* Day band */}
           <div className="flex border-b">
             <div
               className="bg-card sticky left-0 z-30 shrink-0 border-r"
@@ -198,17 +257,18 @@ export function GanttChart({
               {days.map((d) => {
                 const iso = format(d, "yyyy-MM-dd");
                 const weekend = timeline.weekends_enabled && isWeekend(d);
-                const names = holidayByDate.get(iso);
+                const entry = holidayByDate.get(iso);
+                const hc = entry ? firstHolidayColor(entry.countries) : null;
                 const isToday = isSameDay(d, today);
                 return (
                   <div
                     key={iso}
-                    title={names ? names.join("\n") : undefined}
+                    title={entry ? entry.names.join("\n") : undefined}
                     className={cn(
                       "flex shrink-0 flex-col items-center justify-center border-r py-1 text-[10px] leading-tight",
-                      weekend && "bg-muted/60",
-                      names && "bg-rose-500/15",
-                      isToday && "bg-primary/10",
+                      weekend && WEEKEND_HEADER,
+                      hc && hc.header,
+                      isToday && TODAY_HEADER,
                     )}
                     style={{ width: DAY_W }}
                   >
@@ -218,8 +278,8 @@ export function GanttChart({
                     <span
                       className={cn(
                         "tabular-nums",
-                        isToday && "text-primary font-bold",
-                        names && "text-rose-600 dark:text-rose-300",
+                        hc && hc.text,
+                        isToday && TODAY_TEXT,
                       )}
                     >
                       {d.getDate()}
@@ -237,17 +297,27 @@ export function GanttChart({
             Sin elementos todavía. Agregá una tarea o un hito para arrancar.
           </div>
         ) : (
-          items.map((item) => {
+          rows.map((row) => {
+            if (row.type === "group") {
+              return (
+                <GroupHeaderRow
+                  key={row.group ? row.group.id : "__ungrouped__"}
+                  group={row.group}
+                  count={row.count}
+                  gridWidth={gridWidth}
+                />
+              );
+            }
+            const item = row.item;
             const isPrev = preview?.id === item.id;
             const s = isPrev ? preview!.start : item.start_date;
             const en = isPrev ? preview!.end : item.end_date;
             const startIdx = differenceInCalendarDays(parseISO(s), rangeStart);
-            const span =
-              differenceInCalendarDays(parseISO(en), parseISO(s)) + 1;
+            const span = differenceInCalendarDays(parseISO(en), parseISO(s)) + 1;
             const left = startIdx * DAY_W;
             const width = span * DAY_W;
             const colors = ownerColors(item.owner_key);
-            const member = item.owner_key ? getMemberByKey(item.owner_key) : null;
+            const ownerLabel = ownerInfo(item.owner_key)?.label ?? "Sin owner";
             const isMilestone = item.kind === "milestone";
 
             return (
@@ -256,7 +326,6 @@ export function GanttChart({
                 className="group flex border-b last:border-b-0"
                 style={{ height: ROW_H }}
               >
-                {/* Left panel */}
                 <button
                   type="button"
                   onClick={() => onEditItem(item)}
@@ -264,12 +333,7 @@ export function GanttChart({
                   style={{ width: LEFT_W }}
                 >
                   {isMilestone ? (
-                    <span
-                      className={cn(
-                        "size-3 rotate-45 rounded-[2px]",
-                        colors.barBg,
-                      )}
-                    />
+                    <span className={cn("size-3 rotate-45 rounded-[2px]", colors.barBg)} />
                   ) : (
                     <OwnerDot ownerKey={item.owner_key} />
                   )}
@@ -278,7 +342,7 @@ export function GanttChart({
                       {item.title}
                     </span>
                     <span className="text-muted-foreground block truncate text-[11px]">
-                      {member?.name ?? "Sin owner"} ·{" "}
+                      {ownerLabel} ·{" "}
                       {isMilestone
                         ? format(parseISO(item.start_date), "d MMM", { locale: es })
                         : `${format(parseISO(item.start_date), "d MMM", { locale: es })} – ${format(parseISO(item.end_date), "d MMM", { locale: es })}`}
@@ -286,23 +350,22 @@ export function GanttChart({
                   </span>
                 </button>
 
-                {/* Grid area */}
                 <div className="relative" style={{ width: gridWidth }}>
-                  {/* Day backgrounds */}
                   <div className="absolute inset-0 flex">
                     {days.map((d) => {
                       const iso = format(d, "yyyy-MM-dd");
                       const weekend = timeline.weekends_enabled && isWeekend(d);
-                      const isHol = holidayByDate.has(iso);
+                      const entry = holidayByDate.get(iso);
+                      const hc = entry ? firstHolidayColor(entry.countries) : null;
                       const isToday = isSameDay(d, today);
                       return (
                         <div
                           key={iso}
                           className={cn(
                             "shrink-0 border-r",
-                            weekend && "bg-muted/40",
-                            isHol && "bg-rose-500/10",
-                            isToday && "bg-primary/5",
+                            weekend && WEEKEND_BODY,
+                            hc && hc.body,
+                            isToday && TODAY_BODY,
                           )}
                           style={{ width: DAY_W }}
                         />
@@ -310,7 +373,6 @@ export function GanttChart({
                     })}
                   </div>
 
-                  {/* Bar / milestone */}
                   {isMilestone ? (
                     <div
                       className="absolute top-1/2 z-10 -translate-y-1/2"
@@ -335,19 +397,18 @@ export function GanttChart({
                         "absolute top-1/2 z-10 flex -translate-y-1/2 cursor-grab items-center rounded-md shadow-sm active:cursor-grabbing",
                         colors.barBg,
                       )}
-                      style={{ left: left + 2, width: Math.max(DAY_W - 4, width - 4), height: ROW_H - 16 }}
+                      style={{
+                        left: left + 2,
+                        width: Math.max(DAY_W - 4, width - 4),
+                        height: ROW_H - 16,
+                      }}
                       title={item.title}
                     >
                       <span
                         onPointerDown={(e) => startDrag(e, item, "l")}
                         className="absolute inset-y-0 left-0 w-2 cursor-ew-resize rounded-l-md"
                       />
-                      <span
-                        className={cn(
-                          "truncate px-2 text-[11px] font-medium",
-                          colors.barText,
-                        )}
-                      >
+                      <span className={cn("truncate px-2 text-[11px] font-medium", colors.barText)}>
                         {item.title}
                       </span>
                       <span
@@ -362,6 +423,115 @@ export function GanttChart({
           })
         )}
       </div>
+    </div>
+  );
+}
+
+function GroupHeaderRow({
+  group,
+  count,
+  gridWidth,
+}: {
+  group: TimelineGroup | null;
+  count: number;
+  gridWidth: number;
+}) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(group?.name ?? "");
+
+  const renameMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await renameTimelineGroupAction({ id: group!.id, name });
+      if (!res.ok) throw new Error(res.message);
+      return res.data;
+    },
+    onSuccess: () => {
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: TIMELINER_KEY });
+    },
+    onError: (err: Error) => {
+      showToast({ title: err.message });
+      setEditing(false);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      const res = await deleteTimelineGroupAction(group!.id);
+      if (!res.ok) throw new Error(res.message);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: TIMELINER_KEY }),
+    onError: (err: Error) => showToast({ title: err.message }),
+  });
+
+  function commit() {
+    const trimmed = draft.trim();
+    if (group && trimmed && trimmed !== group.name) renameMutation.mutate(trimmed);
+    else {
+      setDraft(group?.name ?? "");
+      setEditing(false);
+    }
+  }
+
+  return (
+    <div className="flex border-b" style={{ height: GROUP_H }}>
+      <div
+        className="bg-muted sticky left-0 z-10 flex shrink-0 items-center gap-2 border-r px-3"
+        style={{ width: LEFT_W }}
+      >
+        {group && editing ? (
+          <Input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commit();
+              } else if (e.key === "Escape") {
+                setDraft(group.name);
+                setEditing(false);
+              }
+            }}
+            className="h-6 text-xs font-semibold"
+          />
+        ) : group ? (
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(group.name);
+              setEditing(true);
+            }}
+            className="hover:bg-foreground/5 -mx-1 truncate rounded px-1 text-left text-xs font-semibold uppercase tracking-wide"
+            title="Click para renombrar"
+          >
+            {group.name}
+          </button>
+        ) : (
+          <span className="text-muted-foreground text-xs font-semibold uppercase tracking-wide">
+            Sin grupo
+          </span>
+        )}
+        <span className="text-muted-foreground text-[11px] tabular-nums">
+          {count}
+        </span>
+        {group ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (confirm(`¿Eliminar el grupo "${group.name}"? Sus tareas quedan sin grupo.`))
+                deleteMutation.mutate();
+            }}
+            className="text-muted-foreground hover:text-destructive ml-auto inline-flex size-5 items-center justify-center rounded"
+            aria-label={`Eliminar grupo ${group.name}`}
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        ) : null}
+      </div>
+      <div className="bg-muted/40" style={{ width: gridWidth }} />
     </div>
   );
 }

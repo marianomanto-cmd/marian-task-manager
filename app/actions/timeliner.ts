@@ -3,18 +3,19 @@
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/result";
-import { TEAM_MEMBERS } from "@/lib/team/members";
 import type {
   Holiday,
   Timeline,
+  TimelineGroup,
   TimelineItem,
 } from "@/lib/timeliner/types";
 import { createClient } from "@/lib/supabase/server";
 
 const TIMELINE_COLUMNS =
   "id, name, position, weekends_enabled, holiday_countries";
+const GROUP_COLUMNS = "id, timeline_id, name, position";
 const ITEM_COLUMNS =
-  "id, timeline_id, title, owner_key, start_date, end_date, kind, position";
+  "id, timeline_id, group_id, title, owner_key, start_date, end_date, kind, position";
 
 const dateSchema = z
   .string()
@@ -22,8 +23,7 @@ const dateSchema = z
 const nameSchema = z.string().trim().min(1, "Falta el nombre").max(120);
 const titleSchema = z.string().trim().min(1, "Falta el título").max(300);
 const kindSchema = z.enum(["task", "milestone"]);
-const ownerKeys = TEAM_MEMBERS.map((m) => m.key) as [string, ...string[]];
-const ownerSchema = z.enum(ownerKeys);
+const ownerSchema = z.enum(["sangria", "client", "third_party"]);
 const countrySchema = z.enum(["AR", "PA", "US", "ES"]);
 
 const createTimelineSchema = z.object({ name: nameSchema });
@@ -34,9 +34,16 @@ const settingsSchema = z.object({
   holiday_countries: z.array(countrySchema).max(8).optional(),
 });
 
+const createGroupSchema = z.object({
+  timeline_id: z.string().uuid(),
+  name: nameSchema,
+});
+const renameGroupSchema = z.object({ id: z.string().uuid(), name: nameSchema });
+
 const createItemSchema = z
   .object({
     timeline_id: z.string().uuid(),
+    group_id: z.string().uuid().nullable().optional(),
     title: titleSchema,
     owner_key: ownerSchema.nullable().optional(),
     start_date: dateSchema,
@@ -51,6 +58,7 @@ const createItemSchema = z
 const updateItemSchema = z
   .object({
     id: z.string().uuid(),
+    group_id: z.string().uuid().nullable().optional(),
     title: titleSchema.optional(),
     owner_key: ownerSchema.nullable().optional(),
     start_date: dateSchema.optional(),
@@ -100,6 +108,7 @@ async function requireUser(): Promise<
 
 export type TimelinerData = {
   timelines: Timeline[];
+  groups: TimelineGroup[];
   items: TimelineItem[];
   holidays: Holiday[];
 };
@@ -112,7 +121,7 @@ export async function getTimelinerAction(): Promise<
 
   try {
     const supabase = await createClient();
-    const [timelinesRes, itemsRes, holidaysRes] = await Promise.all([
+    const [timelinesRes, itemsRes, groupsRes, holidaysRes] = await Promise.all([
       supabase
         .from("timelines")
         .select(TIMELINE_COLUMNS)
@@ -123,12 +132,19 @@ export async function getTimelinerAction(): Promise<
         .select(ITEM_COLUMNS)
         .order("start_date", { ascending: true })
         .order("position", { ascending: true }),
+      supabase
+        .from("timeline_groups")
+        .select(GROUP_COLUMNS)
+        .order("position", { ascending: true }),
       supabase.from("holidays").select("country, date, name"),
     ]);
     if (timelinesRes.error) throw new Error(timelinesRes.error.message);
     if (itemsRes.error) throw new Error(itemsRes.error.message);
-    // Holidays are optional decoration; if the table hasn't been created
-    // (migration 0006), skip the overlay rather than breaking the board.
+    // Groups + holidays are optional; if their tables aren't present yet
+    // (migrations 0025 / 0006), skip them rather than breaking the board.
+    const groups = groupsRes.error
+      ? []
+      : ((groupsRes.data ?? []) as TimelineGroup[]);
     const holidays = holidaysRes.error
       ? []
       : ((holidaysRes.data ?? []) as Holiday[]);
@@ -137,6 +153,7 @@ export async function getTimelinerAction(): Promise<
       ok: true,
       data: {
         timelines: (timelinesRes.data ?? []) as Timeline[],
+        groups,
         items: (itemsRes.data ?? []) as TimelineItem[],
         holidays,
       },
@@ -249,6 +266,85 @@ export async function deleteTimelineAction(
   }
 }
 
+export async function createTimelineGroupAction(
+  input: unknown,
+): Promise<ActionResult<TimelineGroup>> {
+  const parsed = createGroupSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+  const auth = await requireUser();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { data: maxRow } = await supabase
+      .from("timeline_groups")
+      .select("position")
+      .eq("timeline_id", parsed.data.timeline_id)
+      .order("position", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const position = (maxRow?.position ?? -1) + 1;
+
+    const { data, error } = await supabase
+      .from("timeline_groups")
+      .insert({
+        timeline_id: parsed.data.timeline_id,
+        name: parsed.data.name,
+        position,
+      })
+      .select(GROUP_COLUMNS)
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, data: data as TimelineGroup };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function renameTimelineGroupAction(
+  input: unknown,
+): Promise<ActionResult<TimelineGroup>> {
+  const parsed = renameGroupSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+  const auth = await requireUser();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("timeline_groups")
+      .update({ name: parsed.data.name })
+      .eq("id", parsed.data.id)
+      .select(GROUP_COLUMNS)
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, data: data as TimelineGroup };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+export async function deleteTimelineGroupAction(
+  id: string,
+): Promise<ActionResult<{ id: string }>> {
+  const parsed = z.string().uuid().safeParse(id);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+  const auth = await requireUser();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from("timeline_groups")
+      .delete()
+      .eq("id", parsed.data);
+    if (error) throw new Error(error.message);
+    return { ok: true, data: { id: parsed.data } };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
 export async function createTimelineItemAction(
   input: unknown,
 ): Promise<ActionResult<TimelineItem>> {
@@ -273,6 +369,7 @@ export async function createTimelineItemAction(
       .from("timeline_items")
       .insert({
         timeline_id: parsed.data.timeline_id,
+        group_id: parsed.data.group_id ?? null,
         title: parsed.data.title,
         owner_key: parsed.data.owner_key ?? null,
         start_date: parsed.data.start_date,
@@ -300,6 +397,8 @@ export async function updateTimelineItemAction(
   try {
     const supabase = await createClient();
     const patch: Record<string, unknown> = {};
+    if (parsed.data.group_id !== undefined)
+      patch.group_id = parsed.data.group_id ?? null;
     if (parsed.data.title !== undefined) patch.title = parsed.data.title;
     if (parsed.data.owner_key !== undefined)
       patch.owner_key = parsed.data.owner_key ?? null;

@@ -8,16 +8,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { colorForMemberKey, getMemberByKey, TEAM_MEMBERS } from "@/lib/team/members";
+import { ownerInfo, TIMELINE_OWNERS } from "@/lib/timeliner/types";
 import { cn } from "@/lib/utils";
 
 export function OwnerDot({ ownerKey }: { ownerKey: string | null }) {
-  if (!ownerKey) {
-    return <span className="bg-muted-foreground/30 size-2.5 rounded-full" />;
-  }
+  const info = ownerInfo(ownerKey);
   return (
     <span
-      className={cn("size-2.5 rounded-full", colorForMemberKey(ownerKey).barBg)}
+      className={cn(
+        "size-2.5 shrink-0 rounded-full",
+        info ? info.dot : "bg-muted-foreground/30",
+      )}
     />
   );
 }
@@ -29,7 +30,7 @@ export function OwnerPicker({
   value: string | null;
   onChange: (next: string | null) => void;
 }) {
-  const member = value ? getMemberByKey(value) : null;
+  const info = ownerInfo(value);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -38,21 +39,21 @@ export function OwnerPicker({
           className="border-input hover:bg-accent inline-flex h-9 w-full items-center gap-2 rounded-md border bg-transparent px-2 text-sm"
         >
           <OwnerDot ownerKey={value} />
-          <span className={cn(!member && "text-muted-foreground")}>
-            {member?.name ?? "Sin owner"}
+          <span className={cn(!info && "text-muted-foreground")}>
+            {info?.label ?? "Sin owner"}
           </span>
           <ChevronDown className="text-muted-foreground ml-auto size-3.5" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-72 overflow-auto">
+      <DropdownMenuContent align="start">
         <DropdownMenuItem onClick={() => onChange(null)}>
           <OwnerDot ownerKey={null} />
           Sin owner
         </DropdownMenuItem>
-        {TEAM_MEMBERS.map((m) => (
-          <DropdownMenuItem key={m.key} onClick={() => onChange(m.key)}>
-            <OwnerDot ownerKey={m.key} />
-            {m.name}
+        {TIMELINE_OWNERS.map((o) => (
+          <DropdownMenuItem key={o.code} onClick={() => onChange(o.code)}>
+            <OwnerDot ownerKey={o.code} />
+            {o.label}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

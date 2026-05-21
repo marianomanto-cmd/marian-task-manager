@@ -16,13 +16,23 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
 import { showToast } from "@/components/ui/toast";
-import type { TimelineItem, TimelineItemKind } from "@/lib/timeliner/types";
+import type {
+  TimelineGroup,
+  TimelineItem,
+  TimelineItemKind,
+} from "@/lib/timeliner/types";
 import { cn } from "@/lib/utils";
+
+const selectClass = cn(
+  "border-input dark:bg-input/30 focus-visible:border-ring focus-visible:ring-ring/50",
+  "h-9 w-full rounded-md border bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]",
+);
 
 export function ItemEditor({
   open,
   onOpenChange,
   timelineId,
+  groups,
   item,
   defaultStart,
   defaultKind = "task",
@@ -30,6 +40,7 @@ export function ItemEditor({
   open: boolean;
   onOpenChange: (next: boolean) => void;
   timelineId: string;
+  groups: TimelineGroup[];
   item: TimelineItem | null;
   /** YYYY-MM-DD default start when creating. */
   defaultStart: string;
@@ -39,6 +50,7 @@ export function ItemEditor({
   const editing = item !== null;
 
   const [title, setTitle] = React.useState(item?.title ?? "");
+  const [groupId, setGroupId] = React.useState<string>(item?.group_id ?? "");
   const [ownerKey, setOwnerKey] = React.useState<string | null>(
     item?.owner_key ?? null,
   );
@@ -62,6 +74,7 @@ export function ItemEditor({
       if (editing) {
         const res = await updateTimelineItemAction({
           id: item!.id,
+          group_id: groupId || null,
           title: title.trim(),
           owner_key: ownerKey,
           start_date: start,
@@ -73,6 +86,7 @@ export function ItemEditor({
       }
       const res = await createTimelineItemAction({
         timeline_id: timelineId,
+        group_id: groupId || null,
         title: title.trim(),
         owner_key: ownerKey,
         start_date: start,
@@ -149,6 +163,25 @@ export function ItemEditor({
             Owner
           </label>
           <OwnerPicker value={ownerKey} onChange={setOwnerKey} />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-muted-foreground text-xs font-medium">
+            Grupo
+          </label>
+          <select
+            value={groupId}
+            onChange={(e) => setGroupId(e.target.value)}
+            className={selectClass}
+            aria-label="Grupo"
+          >
+            <option value="">Sin grupo</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className={cn("grid gap-2", kind === "task" ? "grid-cols-2" : "grid-cols-1")}>
