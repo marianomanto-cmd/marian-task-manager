@@ -11,23 +11,23 @@ import {
   ArchiveRestore,
   ChevronDown,
   FolderPlus,
+  Layers,
   MoreHorizontal,
   Palette,
   Trash2,
-  Users,
 } from "lucide-react";
 
 import {
-  archiveProjectAction,
-  deleteProjectAction,
-  renameProjectAction,
-  updateProjectMetaAction,
-} from "@/app/actions/projects";
-import { ProjectAvatar } from "@/components/projects/project-avatar";
-import { ProjectItemRow } from "@/components/projects/project-item-row";
-import { ProjectMetaEditor } from "@/components/projects/project-meta-editor";
-import { QuickAddRow } from "@/components/projects/quick-add-row";
-import { PROJECT_ITEMS_KEY } from "@/components/projects/use-project-items";
+  archiveMelyProjectAction,
+  deleteMelyProjectAction,
+  renameMelyProjectAction,
+  updateMelyMetaAction,
+} from "@/app/actions/mely";
+import { MelyAvatar } from "@/components/mely/mely-avatar";
+import { MelyItemRow } from "@/components/mely/mely-item-row";
+import { MelyMetaEditor } from "@/components/mely/mely-meta-editor";
+import { MelyQuickAddRow } from "@/components/mely/mely-quick-add-row";
+import { MELY_ITEMS_KEY } from "@/components/mely/use-mely-board";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -45,20 +45,20 @@ import {
 import { Input } from "@/components/ui/input";
 import { showToast } from "@/components/ui/toast";
 import {
-  PROJECT_COLOR_CLASS,
-  PROJECT_ITEM_STATUS_DOT,
-  PROJECT_ITEM_STATUS_LABEL,
-  defaultProjectMeta,
-  pickStableColor,
-  type DensityMode,
-  type ProjectColor,
-  type ProjectItem,
-  type ProjectItemStatus,
-  type ProjectMeta,
-} from "@/lib/projects/types";
+  MELY_COLOR_CLASS,
+  MELY_ITEM_STATUS_DOT,
+  MELY_ITEM_STATUS_LABEL,
+  defaultMelyMeta,
+  melyPickStableColor,
+  type MelyColor,
+  type MelyDensityMode,
+  type MelyItem,
+  type MelyItemStatus,
+  type MelyProjectMeta,
+} from "@/lib/mely/types";
 import { cn } from "@/lib/utils";
 
-const STATUS_ORDER: ProjectItemStatus[] = [
+const STATUS_ORDER: MelyItemStatus[] = [
   "pending",
   "ongoing",
   "waiting",
@@ -78,13 +78,13 @@ function ProjectName({
 
   const renameMutation = useMutation({
     mutationFn: async (to: string) => {
-      const result = await renameProjectAction({ from: project, to });
+      const result = await renameMelyProjectAction({ from: project, to });
       if (!result.ok) throw new Error(result.message);
       return result.data;
     },
     onSuccess: () => {
       setEditing(false);
-      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
+      qc.invalidateQueries({ queryKey: MELY_ITEMS_KEY });
     },
     onError: (err: Error) => {
       showToast({ title: err.message });
@@ -157,35 +157,35 @@ function GroupMenu({
   project,
   color,
   emoji,
-  client,
-  clientNames,
+  group,
+  groupNames,
 }: {
   project: string;
-  color: ProjectColor;
+  color: MelyColor;
   emoji: string | null;
-  client: string | null;
-  clientNames: string[];
+  group: string | null;
+  groupNames: string[];
 }) {
   const qc = useQueryClient();
 
-  const clientMutation = useMutation({
+  const groupMutation = useMutation({
     mutationFn: async (next: string | null) => {
-      const result = await updateProjectMetaAction({ project, client: next });
+      const result = await updateMelyMetaAction({ project, group: next });
       if (!result.ok) throw new Error(result.message);
       return result.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: MELY_ITEMS_KEY }),
     onError: (err: Error) => showToast({ title: err.message }),
   });
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      const result = await deleteProjectAction(project);
+      const result = await deleteMelyProjectAction(project);
       if (!result.ok) throw new Error(result.message);
       return result.data;
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
+      qc.invalidateQueries({ queryKey: MELY_ITEMS_KEY });
       showToast({
         title: `${data.project} eliminado (${data.count} tareas).`,
       });
@@ -195,7 +195,7 @@ function GroupMenu({
 
   return (
     <>
-      <ProjectMetaEditor
+      <MelyMetaEditor
         project={project}
         color={color}
         emoji={emoji}
@@ -227,23 +227,23 @@ function GroupMenu({
         <DropdownMenuContent align="end">
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <Users className="size-3.5" />
-              Cliente
+              <Layers className="size-3.5" />
+              Grupo
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
               <DropdownMenuLabel className="text-muted-foreground text-[11px]">
                 Mover a…
               </DropdownMenuLabel>
               <DropdownMenuRadioGroup
-                value={client ?? ""}
-                onValueChange={(v) => clientMutation.mutate(v || null)}
+                value={group ?? ""}
+                onValueChange={(v) => groupMutation.mutate(v || null)}
               >
                 <DropdownMenuRadioItem value="">
-                  Sin cliente
+                  Sin grupo
                 </DropdownMenuRadioItem>
-                {clientNames.map((c) => (
-                  <DropdownMenuRadioItem key={c} value={c}>
-                    {c}
+                {groupNames.map((g) => (
+                  <DropdownMenuRadioItem key={g} value={g}>
+                    {g}
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>
@@ -270,10 +270,10 @@ function GroupMenu({
   );
 }
 
-type ClientProject = {
+type GroupProject = {
   project: string;
-  meta: ProjectMeta | undefined;
-  items: ProjectItem[];
+  meta: MelyProjectMeta | undefined;
+  items: MelyItem[];
 };
 
 function ProjectBlock({
@@ -282,25 +282,25 @@ function ProjectBlock({
   items,
   canEdit,
   density,
-  clientNames,
+  groupNames,
   admin,
   inArchive,
 }: {
   project: string;
-  meta: ProjectMeta | undefined;
-  items: ProjectItem[];
+  meta: MelyProjectMeta | undefined;
+  items: MelyItem[];
   canEdit: boolean;
-  density: DensityMode;
-  clientNames: string[];
+  density: MelyDensityMode;
+  groupNames: string[];
   admin: boolean;
   inArchive: boolean;
 }) {
   const [open, setOpen] = React.useState(true);
   const qc = useQueryClient();
-  const pm = meta ?? defaultProjectMeta(project);
+  const pm = meta ?? defaultMelyMeta(project);
 
   const stats = React.useMemo(() => {
-    const counts: Record<ProjectItemStatus, number> = {
+    const counts: Record<MelyItemStatus, number> = {
       pending: 0,
       ongoing: 0,
       waiting: 0,
@@ -312,7 +312,7 @@ function ProjectBlock({
 
   const archiveMutation = useMutation({
     mutationFn: async () => {
-      const result = await archiveProjectAction({
+      const result = await archiveMelyProjectAction({
         project,
         archive: !inArchive,
       });
@@ -320,7 +320,7 @@ function ProjectBlock({
       return result.data;
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
+      qc.invalidateQueries({ queryKey: MELY_ITEMS_KEY });
       showToast({
         title: inArchive
           ? `${data.project} reactivado (${data.count} tareas).`
@@ -347,7 +347,7 @@ function ProjectBlock({
             )}
           />
         </button>
-        <ProjectAvatar
+        <MelyAvatar
           project={project}
           color={pm.color}
           emoji={pm.emoji}
@@ -363,12 +363,12 @@ function ProjectBlock({
                 <span
                   key={s}
                   className="text-muted-foreground inline-flex items-center gap-1 text-[11px]"
-                  title={PROJECT_ITEM_STATUS_LABEL[s]}
+                  title={MELY_ITEM_STATUS_LABEL[s]}
                 >
                   <span
                     className={cn(
                       "size-1.5 rounded-full",
-                      PROJECT_ITEM_STATUS_DOT[s],
+                      MELY_ITEM_STATUS_DOT[s],
                     )}
                   />
                   {stats[s]}
@@ -403,8 +403,8 @@ function ProjectBlock({
             project={project}
             color={pm.color}
             emoji={pm.emoji}
-            client={pm.client ?? null}
-            clientNames={clientNames}
+            group={pm.group ?? null}
+            groupNames={groupNames}
           />
         ) : null}
       </div>
@@ -415,7 +415,7 @@ function ProjectBlock({
             strategy={verticalListSortingStrategy}
           >
             {items.map((item) => (
-              <ProjectItemRow
+              <MelyItemRow
                 key={item.id}
                 item={item}
                 density={density}
@@ -424,39 +424,39 @@ function ProjectBlock({
               />
             ))}
           </SortableContext>
-          {canEdit ? <QuickAddRow project={project} /> : null}
+          {canEdit ? <MelyQuickAddRow project={project} /> : null}
         </>
       ) : null}
     </div>
   );
 }
 
-export function ClientGroup({
-  clientKey,
-  client,
+export function MelyGroupSection({
+  groupKey,
+  group,
   projects,
   canEdit,
   density,
-  clientNames = [],
+  groupNames = [],
   onNewProject,
   admin = false,
   inArchive = false,
   defaultOpen = true,
 }: {
-  clientKey: string | null;
-  client: string;
-  projects: ClientProject[];
+  groupKey: string | null;
+  group: string;
+  projects: GroupProject[];
   canEdit: boolean;
-  density: DensityMode;
-  clientNames?: string[];
-  onNewProject?: (client: string | null) => void;
+  density: MelyDensityMode;
+  groupNames?: string[];
+  onNewProject?: (group: string | null) => void;
   admin?: boolean;
   inArchive?: boolean;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = React.useState(defaultOpen);
-  const color = pickStableColor(client);
-  const palette = PROJECT_COLOR_CLASS[color];
+  const color = melyPickStableColor(group);
+  const palette = MELY_COLOR_CLASS[color];
 
   const allItems = React.useMemo(
     () => projects.flatMap((p) => p.items),
@@ -464,7 +464,7 @@ export function ClientGroup({
   );
 
   const stats = React.useMemo(() => {
-    const counts: Record<ProjectItemStatus, number> = {
+    const counts: Record<MelyItemStatus, number> = {
       pending: 0,
       ongoing: 0,
       waiting: 0,
@@ -502,10 +502,10 @@ export function ClientGroup({
           />
         </Button>
 
-        <ProjectAvatar project={client} color={color} emoji={null} size="md" />
+        <MelyAvatar project={group} color={color} emoji={null} size="md" />
 
         <h2 className="truncate text-sm font-semibold tracking-tight md:text-base">
-          {client}
+          {group}
         </h2>
 
         <span className="text-muted-foreground hidden text-[11px] tabular-nums sm:inline">
@@ -518,12 +518,12 @@ export function ClientGroup({
               <span
                 key={s}
                 className="text-muted-foreground inline-flex items-center gap-1 text-[11px]"
-                title={PROJECT_ITEM_STATUS_LABEL[s]}
+                title={MELY_ITEM_STATUS_LABEL[s]}
               >
                 <span
                   className={cn(
                     "size-1.5 rounded-full",
-                    PROJECT_ITEM_STATUS_DOT[s],
+                    MELY_ITEM_STATUS_DOT[s],
                   )}
                 />
                 {stats[s]}
@@ -555,7 +555,7 @@ export function ClientGroup({
               items={items}
               canEdit={canEdit}
               density={density}
-              clientNames={clientNames}
+              groupNames={groupNames}
               admin={admin}
               inArchive={inArchive}
             />
@@ -563,14 +563,14 @@ export function ClientGroup({
           {canEdit && onNewProject ? (
             <button
               type="button"
-              onClick={() => onNewProject(clientKey)}
+              onClick={() => onNewProject(groupKey)}
               className="text-muted-foreground hover:text-foreground hover:bg-accent/50 flex w-full items-center gap-2 px-3 py-2.5 text-sm transition-colors"
             >
               <FolderPlus className="size-3.5" />
               Nuevo proyecto
-              {client && clientKey !== null ? (
+              {group && groupKey !== null ? (
                 <span className="text-muted-foreground/70 truncate">
-                  en {client}
+                  en {group}
                 </span>
               ) : null}
             </button>

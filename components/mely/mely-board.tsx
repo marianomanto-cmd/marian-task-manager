@@ -16,26 +16,25 @@ import {
   Archive,
   Download,
   FolderPlus,
+  Layers,
   Plus,
   Search,
   SlidersHorizontal,
-  Users,
   X,
 } from "lucide-react";
 
 import {
-  createClientAction,
-  createProjectAction,
-  deleteClientAction,
-  reorderProjectItemsAction,
-} from "@/app/actions/projects";
-import { ClientGroup } from "@/components/projects/project-group";
-import { ShareButton } from "@/components/projects/share-button";
+  createMelyGroupAction,
+  createMelyProjectAction,
+  deleteMelyGroupAction,
+  reorderMelyItemsAction,
+} from "@/app/actions/mely";
+import { MelyGroupSection } from "@/components/mely/mely-group-section";
 import {
-  PROJECT_ITEMS_KEY,
-  projectBoardKey,
-  useProjectBoard,
-} from "@/components/projects/use-project-items";
+  MELY_ITEMS_KEY,
+  melyBoardKey,
+  useMelyBoard,
+} from "@/components/mely/use-mely-board";
 import { FilterChips } from "@/components/tasks/filter-chips";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,62 +46,58 @@ import {
 import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
 import { showToast } from "@/components/ui/toast";
 import {
-  PROJECT_ITEM_CATEGORIES,
-  PROJECT_ITEM_CATEGORY_LABEL,
-  PROJECT_ITEM_STATUSES,
-  PROJECT_ITEM_STATUS_LABEL,
-  type Client,
-  type DensityMode,
-  type ProjectItem,
-  type ProjectItemCategory,
-  type ProjectItemStatus,
-  type ProjectMeta,
-} from "@/lib/projects/types";
+  MELY_ITEM_CATEGORIES,
+  MELY_ITEM_CATEGORY_LABEL,
+  MELY_ITEM_STATUSES,
+  MELY_ITEM_STATUS_LABEL,
+  type MelyDensityMode,
+  type MelyGroup,
+  type MelyItem,
+  type MelyItemCategory,
+  type MelyItemStatus,
+  type MelyProjectMeta,
+} from "@/lib/mely/types";
 import { cn } from "@/lib/utils";
 
-const STATUS_OPTIONS = PROJECT_ITEM_STATUSES.map((s) => ({
+const STATUS_OPTIONS = MELY_ITEM_STATUSES.map((s) => ({
   value: s,
-  label: PROJECT_ITEM_STATUS_LABEL[s],
+  label: MELY_ITEM_STATUS_LABEL[s],
 }));
-const CATEGORY_OPTIONS = PROJECT_ITEM_CATEGORIES.map((c) => ({
+const CATEGORY_OPTIONS = MELY_ITEM_CATEGORIES.map((c) => ({
   value: c,
-  label: PROJECT_ITEM_CATEGORY_LABEL[c],
+  label: MELY_ITEM_CATEGORY_LABEL[c],
 }));
 
 type View = "active" | "archive";
 
-/** Sentinel filter/group value for projects with no client assigned. */
-const NO_CLIENT = "__none__";
+/** Sentinel filter/group value for projects with no group assigned. */
+const NO_GROUP = "__none__";
 
 const selectClass = cn(
   "border-input dark:bg-input/30 focus-visible:border-ring focus-visible:ring-ring/50",
   "h-9 w-full rounded-md border bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]",
 );
 
-export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
+export function MelyBoard() {
+  const canEdit = true;
   const [view, setView] = React.useState<View>("active");
-  const query = useProjectBoard({ archiveMode: view });
+  const query = useMelyBoard({ archiveMode: view });
   const qc = useQueryClient();
 
-  const [statuses, setStatuses] = React.useState<ProjectItemStatus[]>([
-    ...PROJECT_ITEM_STATUSES,
+  const [statuses, setStatuses] = React.useState<MelyItemStatus[]>([
+    ...MELY_ITEM_STATUSES,
   ]);
-  const [categories, setCategories] = React.useState<ProjectItemCategory[]>([
-    ...PROJECT_ITEM_CATEGORIES,
+  const [categories, setCategories] = React.useState<MelyItemCategory[]>([
+    ...MELY_ITEM_CATEGORIES,
   ]);
-  const [selectedClient, setSelectedClient] = React.useState<string | null>(
-    null,
-  );
+  const [selectedGroup, setSelectedGroup] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState("");
   const [showFilters, setShowFilters] = React.useState(true);
-  const density: DensityMode = "comfortable";
+  const density: MelyDensityMode = "comfortable";
   const searchRef = React.useRef<HTMLInputElement>(null);
 
-  // Top-down creation: a single dialog creates a project + its first task,
-  // optionally pre-scoped to a client. `newProjectClient` is the preset and
-  // `newProjectKey` remounts the dialog on each open so its fields reset.
   const [newProjectOpen, setNewProjectOpen] = React.useState(false);
-  const [newProjectClient, setNewProjectClient] = React.useState<string | null>(
+  const [newProjectGroup, setNewProjectGroup] = React.useState<string | null>(
     null,
   );
   const [newProjectKey, setNewProjectKey] = React.useState(0);
@@ -115,19 +110,19 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     () => query.data?.data.meta ?? [],
     [query.data?.data.meta],
   );
-  const clients = React.useMemo(
-    () => query.data?.data.clients ?? [],
-    [query.data?.data.clients],
+  const groups = React.useMemo(
+    () => query.data?.data.groups ?? [],
+    [query.data?.data.groups],
   );
-  const clientNames = React.useMemo(() => clients.map((c) => c.name), [clients]);
+  const groupNames = React.useMemo(() => groups.map((g) => g.name), [groups]);
   const metaByProject = React.useMemo(() => {
-    const map = new Map<string, ProjectMeta>();
+    const map = new Map<string, MelyProjectMeta>();
     for (const m of meta) map.set(m.project, m);
     return map;
   }, [meta]);
-  const clientByProject = React.useMemo(() => {
+  const groupByProject = React.useMemo(() => {
     const map = new Map<string, string | null>();
-    for (const m of meta) map.set(m.project, m.client ?? null);
+    for (const m of meta) map.set(m.project, m.group ?? null);
     return map;
   }, [meta]);
 
@@ -145,7 +140,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
   }, [items, statuses, categories, search]);
 
   const grouped = React.useMemo(() => {
-    const map = new Map<string, ProjectItem[]>();
+    const map = new Map<string, MelyItem[]>();
     for (const it of filtered) {
       if (!map.has(it.project)) map.set(it.project, []);
       map.get(it.project)!.push(it);
@@ -164,20 +159,20 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     });
   }, [grouped, metaByProject]);
 
-  const clientGroups = React.useMemo(() => {
-    const byClient = new Map<string, { project: string; items: ProjectItem[] }[]>();
+  const groupSections = React.useMemo(() => {
+    const byGroup = new Map<string, { project: string; items: MelyItem[] }[]>();
     for (const [project, list] of orderedGroups) {
-      const key = clientByProject.get(project) ?? null;
-      const bucket = key ?? NO_CLIENT;
-      if (!byClient.has(bucket)) byClient.set(bucket, []);
-      byClient.get(bucket)!.push({ project, items: list });
+      const key = groupByProject.get(project) ?? null;
+      const bucket = key ?? NO_GROUP;
+      if (!byGroup.has(bucket)) byGroup.set(bucket, []);
+      byGroup.get(bucket)!.push({ project, items: list });
     }
     const order = new Map<string, number>();
-    clients.forEach((c, i) => order.set(c.name, i));
-    const entries = Array.from(byClient.entries());
+    groups.forEach((g, i) => order.set(g.name, i));
+    const entries = Array.from(byGroup.entries());
     entries.sort(([a], [b]) => {
-      if (a === NO_CLIENT) return 1;
-      if (b === NO_CLIENT) return -1;
+      if (a === NO_GROUP) return 1;
+      if (b === NO_GROUP) return -1;
       const pa = order.get(a) ?? 1e6;
       const pb = order.get(b) ?? 1e6;
       if (pa !== pb) return pa - pb;
@@ -185,45 +180,44 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     });
     return entries.map(([key, projects]) => ({
       key,
-      client: key === NO_CLIENT ? "Sin cliente" : key,
+      group: key === NO_GROUP ? "Sin grupo" : key,
       projects: projects.map(({ project, items: list }) => ({
         project,
         meta: metaByProject.get(project),
         items: list,
       })),
     }));
-  }, [orderedGroups, clientByProject, clients, metaByProject]);
+  }, [orderedGroups, groupByProject, groups, metaByProject]);
 
   const hasUnassigned = React.useMemo(
-    () => clientGroups.some((g) => g.key === NO_CLIENT),
-    [clientGroups],
+    () => groupSections.some((g) => g.key === NO_GROUP),
+    [groupSections],
   );
 
-  const visibleClientGroups = React.useMemo(
+  const visibleGroupSections = React.useMemo(
     () =>
-      selectedClient === null
-        ? clientGroups
-        : clientGroups.filter((g) => g.key === selectedClient),
-    [clientGroups, selectedClient],
+      selectedGroup === null
+        ? groupSections
+        : groupSections.filter((g) => g.key === selectedGroup),
+    [groupSections, selectedGroup],
   );
 
-  /** The concrete client currently in focus, or null for "Todos"/"Sin cliente". */
-  const focusedClient =
-    selectedClient && selectedClient !== NO_CLIENT ? selectedClient : null;
+  const focusedGroup =
+    selectedGroup && selectedGroup !== NO_GROUP ? selectedGroup : null;
 
   const openNewProject = React.useCallback(
     (preset?: string | null) => {
       const def =
         preset !== undefined
           ? preset
-          : selectedClient && selectedClient !== NO_CLIENT
-            ? selectedClient
+          : selectedGroup && selectedGroup !== NO_GROUP
+            ? selectedGroup
             : null;
-      setNewProjectClient(def);
+      setNewProjectGroup(def);
       setNewProjectKey((k) => k + 1);
       setNewProjectOpen(true);
     },
-    [selectedClient],
+    [selectedGroup],
   );
 
   const sensors = useSensors(
@@ -235,14 +229,12 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
 
   const reorderItemsMutation = useMutation({
     mutationFn: async (vars: { project: string; ids: string[] }) => {
-      const result = await reorderProjectItemsAction(vars);
+      const result = await reorderMelyItemsAction(vars);
       if (!result.ok) throw new Error(result.message);
       return result.data;
     },
     onSuccess: () =>
-      qc.invalidateQueries({
-        queryKey: projectBoardKey({ archiveMode: view }),
-      }),
+      qc.invalidateQueries({ queryKey: melyBoardKey({ archiveMode: view }) }),
     onError: (err: Error) => showToast({ title: err.message }),
   });
 
@@ -263,10 +255,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     const newIdx = list.findIndex((it) => it.id === overId);
     if (oldIdx === -1 || newIdx === -1) return;
     const nextIds = arrayMove(list, oldIdx, newIdx).map((it) => it.id);
-    reorderItemsMutation.mutate({
-      project: activeItem.project,
-      ids: nextIds,
-    });
+    reorderItemsMutation.mutate({ project: activeItem.project, ids: nextIds });
   }
 
   React.useEffect(() => {
@@ -282,7 +271,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
       if (e.key === "/") {
         e.preventDefault();
         searchRef.current?.focus();
-      } else if (canEdit && (e.key === "n" || e.key === "N")) {
+      } else if (e.key === "n" || e.key === "N") {
         e.preventDefault();
         openNewProject();
       } else if (e.key === "a" || e.key === "A") {
@@ -292,19 +281,11 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canEdit, openNewProject]);
+  }, [openNewProject]);
 
   function exportCsv() {
     const rows = [
-      [
-        "project",
-        "title",
-        "category",
-        "status",
-        "due_date",
-        "link",
-        "description",
-      ],
+      ["project", "title", "category", "status", "due_date", "link", "description"],
       ...items.map((it) => [
         it.project,
         it.title,
@@ -322,29 +303,29 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `proyectos-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `board-mely-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
 
   const inArchive = view === "archive";
-  const hasGroups = visibleClientGroups.length > 0;
+  const hasSections = visibleGroupSections.length > 0;
   const filtersActive =
     search.trim().length > 0 ||
-    statuses.length !== PROJECT_ITEM_STATUSES.length ||
-    categories.length !== PROJECT_ITEM_CATEGORIES.length;
+    statuses.length !== MELY_ITEM_STATUSES.length ||
+    categories.length !== MELY_ITEM_CATEGORIES.length;
 
   return (
     <section className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
-            {inArchive ? "Archivo de proyectos" : "Proyectos"}
+            {inArchive ? "Archivo · Board - Mely" : "Board - Mely"}
           </h1>
           <p className="text-muted-foreground text-xs">
             {inArchive
               ? "Tareas archivadas. Reactivá las que vuelvan a estar en juego."
-              : "Elegí un cliente y creá sus proyectos; dentro de cada proyecto cargás las tareas. Visible para todo el equipo; sólo Mariano edita."}
+              : "Elegí un grupo y creá sus proyectos; dentro de cada proyecto cargás las tareas."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -378,7 +359,6 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
             <SlidersHorizontal />
             Filtros
           </Button>
-          {canEdit && !inArchive ? <ShareButton /> : null}
           <Button
             type="button"
             size="sm"
@@ -390,7 +370,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
             <Download />
             CSV
           </Button>
-          {canEdit && !inArchive ? (
+          {!inArchive ? (
             <Button
               type="button"
               onClick={() => openNewProject()}
@@ -403,23 +383,23 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
         </div>
       </header>
 
-      <ClientFilterBar
-        clients={clients}
-        selected={selectedClient}
-        onSelect={setSelectedClient}
+      <GroupFilterBar
+        groups={groups}
+        selected={selectedGroup}
+        onSelect={setSelectedGroup}
         hasUnassigned={hasUnassigned}
         canManage={canEdit && !inArchive}
       />
 
       {showFilters ? (
         <div className="flex flex-col gap-2">
-          <FilterChips<ProjectItemStatus>
+          <FilterChips<MelyItemStatus>
             label="Status"
             options={STATUS_OPTIONS}
             selected={statuses}
             onChange={setStatuses}
           />
-          <FilterChips<ProjectItemCategory>
+          <FilterChips<MelyItemCategory>
             label="Categoría"
             options={CATEGORY_OPTIONS}
             selected={categories}
@@ -428,12 +408,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
         </div>
       ) : null}
 
-      {query.data?.authRequired ? (
-        <p className="text-destructive text-sm" role="alert">
-          Iniciá sesión para ver el board.
-        </p>
-      ) : null}
-      {query.data?.error && !query.data.authRequired ? (
+      {query.data?.error ? (
         <p className="text-destructive text-sm" role="alert">
           {query.data.error}
         </p>
@@ -441,18 +416,14 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
 
       {query.isLoading ? (
         <p className="text-muted-foreground text-sm">Cargando board…</p>
-      ) : !hasGroups ? (
-        focusedClient && canEdit && !inArchive && !filtersActive ? (
-          <ClientEmptyState
-            client={focusedClient}
-            onNewProject={() => openNewProject(focusedClient)}
+      ) : !hasSections ? (
+        focusedGroup && !inArchive && !filtersActive ? (
+          <GroupEmptyState
+            group={focusedGroup}
+            onNewProject={() => openNewProject(focusedGroup)}
           />
         ) : (
-          <EmptyState
-            canEdit={canEdit}
-            hasItems={items.length > 0}
-            archive={inArchive}
-          />
+          <EmptyState hasItems={items.length > 0} archive={inArchive} />
         )
       ) : (
         <DndContext
@@ -461,15 +432,15 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
           onDragEnd={handleDragEnd}
         >
           <div className="flex flex-col gap-4">
-            {visibleClientGroups.map((cg) => (
-              <ClientGroup
-                key={cg.key}
-                clientKey={cg.key === NO_CLIENT ? null : cg.key}
-                client={cg.client}
-                projects={cg.projects}
+            {visibleGroupSections.map((gs) => (
+              <MelyGroupSection
+                key={gs.key}
+                groupKey={gs.key === NO_GROUP ? null : gs.key}
+                group={gs.group}
+                projects={gs.projects}
                 canEdit={canEdit && !inArchive}
                 density={density}
-                clientNames={clientNames}
+                groupNames={groupNames}
                 onNewProject={openNewProject}
                 admin={canEdit}
                 inArchive={inArchive}
@@ -479,29 +450,27 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
         </DndContext>
       )}
 
-      {canEdit ? (
-        <NewProjectDialog
-          key={newProjectKey}
-          open={newProjectOpen}
-          onOpenChange={setNewProjectOpen}
-          clients={clientNames}
-          defaultClient={newProjectClient}
-        />
-      ) : null}
+      <NewProjectDialog
+        key={newProjectKey}
+        open={newProjectOpen}
+        onOpenChange={setNewProjectOpen}
+        groups={groupNames}
+        defaultGroup={newProjectGroup}
+      />
 
-      <KeyboardHint canEdit={canEdit} />
+      <KeyboardHint />
     </section>
   );
 }
 
-function ClientFilterBar({
-  clients,
+function GroupFilterBar({
+  groups,
   selected,
   onSelect,
   hasUnassigned,
   canManage,
 }: {
-  clients: Client[];
+  groups: MelyGroup[];
   selected: string | null;
   onSelect: (next: string | null) => void;
   hasUnassigned: boolean;
@@ -519,7 +488,7 @@ function ClientFilterBar({
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
-        Cliente
+        Grupo
       </span>
 
       <button
@@ -530,40 +499,40 @@ function ClientFilterBar({
         Todos
       </button>
 
-      {clients.map((c) => (
+      {groups.map((g) => (
         <button
-          key={c.name}
+          key={g.name}
           type="button"
-          onClick={() => onSelect(c.name)}
-          className={cn(pillClass(selected === c.name), "max-w-[14rem] truncate")}
+          onClick={() => onSelect(g.name)}
+          className={cn(pillClass(selected === g.name), "max-w-[14rem] truncate")}
         >
-          {c.name}
+          {g.name}
         </button>
       ))}
 
       {hasUnassigned ? (
         <button
           type="button"
-          onClick={() => onSelect(NO_CLIENT)}
-          className={pillClass(selected === NO_CLIENT)}
+          onClick={() => onSelect(NO_GROUP)}
+          className={pillClass(selected === NO_GROUP)}
         >
-          Sin cliente
+          Sin grupo
         </button>
       ) : null}
 
       {canManage ? (
-        <ManageClients clients={clients} selected={selected} onSelect={onSelect} />
+        <ManageGroups groups={groups} selected={selected} onSelect={onSelect} />
       ) : null}
     </div>
   );
 }
 
-function ManageClients({
-  clients,
+function ManageGroups({
+  groups,
   selected,
   onSelect,
 }: {
-  clients: Client[];
+  groups: MelyGroup[];
   selected: string | null;
   onSelect: (next: string | null) => void;
 }) {
@@ -573,13 +542,13 @@ function ManageClients({
 
   const createMutation = useMutation({
     mutationFn: async (n: string) => {
-      const result = await createClientAction(n);
+      const result = await createMelyGroupAction(n);
       if (!result.ok) throw new Error(result.message);
       return result.data;
     },
     onSuccess: (data) => {
       setName("");
-      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
+      qc.invalidateQueries({ queryKey: MELY_ITEMS_KEY });
       onSelect(data.name);
     },
     onError: (err: Error) => showToast({ title: err.message }),
@@ -587,12 +556,12 @@ function ManageClients({
 
   const deleteMutation = useMutation({
     mutationFn: async (n: string) => {
-      const result = await deleteClientAction(n);
+      const result = await deleteMelyGroupAction(n);
       if (!result.ok) throw new Error(result.message);
       return result.data;
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
+      qc.invalidateQueries({ queryKey: MELY_ITEMS_KEY });
       if (selected === data.name) onSelect(null);
     },
     onError: (err: Error) => showToast({ title: err.message }),
@@ -611,14 +580,14 @@ function ManageClients({
           size="sm"
           variant="ghost"
           className="text-muted-foreground h-7 gap-1.5 px-2"
-          title="Gestionar clientes"
+          title="Gestionar grupos"
         >
-          <Users className="size-3.5" />
+          <Layers className="size-3.5" />
           Gestionar
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 space-y-3">
-        <div className="text-xs font-medium">Gestionar clientes</div>
+        <div className="text-xs font-medium">Gestionar grupos</div>
         <div className="flex items-center gap-2">
           <Input
             autoFocus
@@ -630,7 +599,7 @@ function ManageClients({
                 add();
               }
             }}
-            placeholder="Nuevo cliente…"
+            placeholder="Nuevo grupo…"
             className="h-9"
           />
           <Button
@@ -638,31 +607,31 @@ function ManageClients({
             size="icon"
             onClick={add}
             disabled={!name.trim() || createMutation.isPending}
-            aria-label="Agregar cliente"
+            aria-label="Agregar grupo"
           >
             <Plus className="size-3.5" />
           </Button>
         </div>
 
-        {clients.length > 0 ? (
+        {groups.length > 0 ? (
           <ul className="max-h-64 space-y-0.5 overflow-auto">
-            {clients.map((c) => (
+            {groups.map((g) => (
               <li
-                key={c.name}
+                key={g.name}
                 className="hover:bg-accent flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
               >
-                <span className="truncate text-sm">{c.name}</span>
+                <span className="truncate text-sm">{g.name}</span>
                 <button
                   type="button"
                   onClick={() => {
                     if (
                       confirm(
-                        `¿Quitar el cliente "${c.name}"? Los proyectos asignados quedan sin cliente.`,
+                        `¿Quitar el grupo "${g.name}"? Los proyectos asignados quedan sin grupo.`,
                       )
                     )
-                      deleteMutation.mutate(c.name);
+                      deleteMutation.mutate(g.name);
                   }}
-                  aria-label={`Quitar ${c.name}`}
+                  aria-label={`Quitar ${g.name}`}
                   className="text-muted-foreground hover:text-destructive inline-flex size-5 shrink-0 items-center justify-center rounded"
                 >
                   <X className="size-3.5" />
@@ -672,7 +641,7 @@ function ManageClients({
           </ul>
         ) : (
           <p className="text-muted-foreground text-xs">
-            Todavía no hay clientes. Agregá el primero arriba.
+            Todavía no hay grupos. Agregá el primero arriba.
           </p>
         )}
       </PopoverContent>
@@ -683,26 +652,25 @@ function ManageClients({
 function NewProjectDialog({
   open,
   onOpenChange,
-  clients,
-  defaultClient,
+  groups,
+  defaultGroup,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
-  clients: string[];
-  defaultClient: string | null;
+  groups: string[];
+  defaultGroup: string | null;
 }) {
   const qc = useQueryClient();
   const [name, setName] = React.useState("");
   const [title, setTitle] = React.useState("");
-  const [category, setCategory] =
-    React.useState<ProjectItemCategory>("otros");
-  const [client, setClient] = React.useState<string>(defaultClient ?? "");
+  const [category, setCategory] = React.useState<MelyItemCategory>("otros");
+  const [group, setGroup] = React.useState<string>(defaultGroup ?? "");
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const result = await createProjectAction({
+      const result = await createMelyProjectAction({
         name: name.trim(),
-        client: client || null,
+        group: group || null,
         title: title.trim(),
         category,
       });
@@ -711,7 +679,7 @@ function NewProjectDialog({
     },
     onSuccess: () => {
       onOpenChange(false);
-      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
+      qc.invalidateQueries({ queryKey: MELY_ITEMS_KEY });
     },
     onError: (err: Error) => showToast({ title: err.message }),
   });
@@ -736,18 +704,18 @@ function NewProjectDialog({
       <div className="space-y-3">
         <div className="space-y-1">
           <label className="text-muted-foreground text-xs font-medium">
-            Cliente
+            Grupo
           </label>
           <select
-            value={client}
-            onChange={(e) => setClient(e.target.value)}
+            value={group}
+            onChange={(e) => setGroup(e.target.value)}
             className={selectClass}
-            aria-label="Cliente del proyecto"
+            aria-label="Grupo del proyecto"
           >
-            <option value="">Sin cliente</option>
-            {clients.map((c) => (
-              <option key={c} value={c}>
-                {c}
+            <option value="">Sin grupo</option>
+            {groups.map((g) => (
+              <option key={g} value={g}>
+                {g}
               </option>
             ))}
           </select>
@@ -784,14 +752,14 @@ function NewProjectDialog({
             <select
               value={category}
               onChange={(e) =>
-                setCategory(e.target.value as ProjectItemCategory)
+                setCategory(e.target.value as MelyItemCategory)
               }
               className={cn(selectClass, "w-28")}
               aria-label="Categoría"
             >
-              {PROJECT_ITEM_CATEGORIES.map((c) => (
+              {MELY_ITEM_CATEGORIES.map((c) => (
                 <option key={c} value={c}>
-                  {PROJECT_ITEM_CATEGORY_LABEL[c]}
+                  {MELY_ITEM_CATEGORY_LABEL[c]}
                 </option>
               ))}
             </select>
@@ -808,21 +776,21 @@ function NewProjectDialog({
   );
 }
 
-function ClientEmptyState({
-  client,
+function GroupEmptyState({
+  group,
   onNewProject,
 }: {
-  client: string;
+  group: string;
   onNewProject: () => void;
 }) {
   return (
     <div className="bg-muted/30 flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center">
       <div>
         <p className="text-sm font-medium">
-          «{client}» todavía no tiene proyectos
+          «{group}» todavía no tiene proyectos
         </p>
         <p className="text-muted-foreground text-xs">
-          Creá el primer proyecto de este cliente para arrancar a cargar tareas.
+          Creá el primer proyecto de este grupo para arrancar a cargar tareas.
         </p>
       </div>
       <Button type="button" onClick={onNewProject}>
@@ -834,11 +802,9 @@ function ClientEmptyState({
 }
 
 function EmptyState({
-  canEdit,
   hasItems,
   archive,
 }: {
-  canEdit: boolean;
   hasItems: boolean;
   archive: boolean;
 }) {
@@ -856,25 +822,17 @@ function EmptyState({
           ? "Probá quitar filtros o limpiar la búsqueda."
           : archive
             ? "Cuando archives tareas las vas a ver acá."
-            : canEdit
-              ? "Tocá Nuevo proyecto o presioná N para arrancar."
-              : "Cuando Mariano cargue proyectos los vas a ver acá."}
+            : "Tocá Nuevo proyecto o presioná N para arrancar."}
       </p>
     </div>
   );
 }
 
-function KeyboardHint({ canEdit }: { canEdit: boolean }) {
+function KeyboardHint() {
   return (
     <p className="text-muted-foreground/70 hidden text-[10px] md:block">
-      Atajos: <Kbd>/</Kbd> buscar
-      {canEdit ? (
-        <>
-          {" · "}
-          <Kbd>N</Kbd> nuevo proyecto
-        </>
-      ) : null}{" "}
-      · <Kbd>A</Kbd> archivo
+      Atajos: <Kbd>/</Kbd> buscar · <Kbd>N</Kbd> nuevo proyecto · <Kbd>A</Kbd>{" "}
+      archivo
     </p>
   );
 }

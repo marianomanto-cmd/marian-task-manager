@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { isAdminEmail, isSangriaEmail } from "@/lib/auth/admin";
 
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/p"];
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/p", "/boardmely"];
 const ADMIN_ONLY_PATHS = ["/projects"];
 
 function isPathInList(path: string, list: readonly string[]): boolean {

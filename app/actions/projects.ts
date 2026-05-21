@@ -518,6 +518,52 @@ export async function deleteProjectAction(
   }
 }
 
+const archiveProjectSchema = z.object({
+  project: projectSchema,
+  archive: z.boolean(),
+});
+
+/**
+ * Archives (or reactivates) a whole project by flipping `archived_at` on all
+ * of its items. Archived projects drop out of the active board and show up in
+ * the Archive view, so projects can be retired as they wrap up.
+ */
+export async function archiveProjectAction(
+  input: unknown,
+): Promise<ActionResult<{ project: string; count: number }>> {
+  const parsed = archiveProjectSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    let q = supabase
+      .from("project_items")
+      .update({
+        archived_at: parsed.data.archive ? new Date().toISOString() : null,
+      })
+      .eq("user_id", auth.userId)
+      .eq("project", parsed.data.project);
+    // Only touch the rows that are in the opposite state, so reactivating a
+    // project doesn't disturb timestamps and stays idempotent.
+    q = parsed.data.archive
+      ? q.is("archived_at", null)
+      : q.not("archived_at", "is", null);
+
+    const { data, error } = await q.select("id");
+    if (error) throw new Error(error.message);
+
+    return {
+      ok: true,
+      data: { project: parsed.data.project, count: (data ?? []).length },
+    };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
 export async function reorderProjectItemsAction(
   input: unknown,
 ): Promise<ActionResult<{ count: number }>> {
