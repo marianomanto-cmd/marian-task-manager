@@ -11,7 +11,12 @@ export function BottomNav({ isAdmin }: { isAdmin: boolean }) {
   const items = visibleNavItems(isAdmin);
   // With a single nav item there's nothing to switch to — skip the bar.
   if (items.length <= 1) return null;
-  const gridCols = items.length === 2 ? "grid-cols-2" : "grid-cols-1";
+  const gridCols =
+    items.length >= 4
+      ? "grid-cols-4"
+      : items.length === 3
+        ? "grid-cols-3"
+        : "grid-cols-2";
 
   return (
     <nav

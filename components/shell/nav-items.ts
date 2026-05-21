@@ -1,7 +1,12 @@
-import { FolderKanban, ListChecks, type LucideIcon } from "lucide-react";
+import {
+  CalendarRange,
+  FolderKanban,
+  ListChecks,
+  type LucideIcon,
+} from "lucide-react";
 
 export type NavItem = {
-  href: "/tasks" | "/projects";
+  href: "/tasks" | "/projects" | "/timeliner";
   label: string;
   icon: LucideIcon;
   /** Visible only to ADMIN_EMAIL (Mariano). */
@@ -11,6 +16,7 @@ export type NavItem = {
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/tasks", label: "Mi board", icon: ListChecks },
   { href: "/projects", label: "Proyectos", icon: FolderKanban, adminOnly: true },
+  { href: "/timeliner", label: "Timeliner", icon: CalendarRange },
 ] as const;
 
 export function visibleNavItems(isAdmin: boolean): readonly NavItem[] {
