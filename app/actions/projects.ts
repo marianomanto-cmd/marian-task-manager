@@ -8,6 +8,7 @@ import {
   PROJECT_COLORS,
   PROJECT_ITEM_CATEGORIES,
   PROJECT_ITEM_STATUSES,
+  pickStableColor,
   type Client,
   type ProjectColor,
   type ProjectItem,
@@ -56,6 +57,13 @@ const createSchema = z.object({
   due_date: dateSchema.optional().nullable(),
   link: linkSchema.optional().nullable(),
   description: descriptionSchema.optional().nullable(),
+});
+
+const createProjectSchema = z.object({
+  name: projectSchema,
+  client: z.string().trim().max(120).nullable().optional(),
+  title: titleSchema,
+  category: categorySchema.default("otros"),
 });
 
 const updateSchema = z.object({
@@ -266,6 +274,85 @@ export async function createProjectItemAction(
       .single();
     if (error) throw new Error(error.message);
     return { ok: true, data: data as ProjectItem };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+/**
+ * Creates a project (a `projects_meta` row) together with its first task, so
+ * the board never ends up with empty, hidden projects. The optional `client`
+ * ties the project to a client up front, replacing the old flow where you had
+ * to assign the client separately after the fact.
+ */
+export async function createProjectAction(
+  input: unknown,
+): Promise<ActionResult<{ project: string; item: ProjectItem }>> {
+  const parsed = createProjectSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const name = parsed.data.name;
+
+    // A project is identified by its name, so reject duplicates whether they
+    // already exist as a meta row or only as items.
+    const [existingMeta, existingItem] = await Promise.all([
+      supabase
+        .from("projects_meta")
+        .select("project")
+        .eq("user_id", auth.userId)
+        .eq("project", name)
+        .maybeSingle(),
+      supabase
+        .from("project_items")
+        .select("id")
+        .eq("user_id", auth.userId)
+        .eq("project", name)
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    if (existingMeta.data || existingItem.data)
+      return asInvalid(`Ya existe un proyecto llamado "${name}".`);
+
+    const { data: maxRow } = await supabase
+      .from("projects_meta")
+      .select("position")
+      .eq("user_id", auth.userId)
+      .order("position", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const position = (maxRow?.position ?? -1) + 1;
+
+    const client = parsed.data.client?.length ? parsed.data.client : null;
+    const { error: metaError } = await supabase.from("projects_meta").insert({
+      user_id: auth.userId,
+      project: name,
+      color: pickStableColor(name),
+      emoji: null,
+      client,
+      position,
+    });
+    if (metaError) throw new Error(metaError.message);
+
+    const { data: item, error: itemError } = await supabase
+      .from("project_items")
+      .insert({
+        user_id: auth.userId,
+        project: name,
+        title: parsed.data.title,
+        category: parsed.data.category,
+        status: "pending",
+        position: 0,
+      })
+      .select(SELECT_COLUMNS)
+      .single();
+    if (itemError) throw new Error(itemError.message);
+
+    return { ok: true, data: { project: name, item: item as ProjectItem } };
   } catch (err) {
     return asUnknown(err);
   }

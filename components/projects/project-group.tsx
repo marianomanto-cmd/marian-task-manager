@@ -6,11 +6,19 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, MoreHorizontal, Palette, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  FolderPlus,
+  MoreHorizontal,
+  Palette,
+  Trash2,
+  Users,
+} from "lucide-react";
 
 import {
   deleteProjectAction,
   renameProjectAction,
+  updateProjectMetaAction,
 } from "@/app/actions/projects";
 import { ProjectAvatar } from "@/components/projects/project-avatar";
 import { ProjectItemRow } from "@/components/projects/project-item-row";
@@ -22,6 +30,13 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -150,6 +165,16 @@ function GroupMenu({
 }) {
   const qc = useQueryClient();
 
+  const clientMutation = useMutation({
+    mutationFn: async (next: string | null) => {
+      const result = await updateProjectMetaAction({ project, client: next });
+      if (!result.ok) throw new Error(result.message);
+      return result.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY }),
+    onError: (err: Error) => showToast({ title: err.message }),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async () => {
       const result = await deleteProjectAction(project);
@@ -171,15 +196,13 @@ function GroupMenu({
         project={project}
         color={color}
         emoji={emoji}
-        client={client}
-        clients={clientNames}
         trigger={
           <Button
             type="button"
             size="icon"
             variant="ghost"
             className="size-7"
-            aria-label="Personalizar proyecto"
+            aria-label="Color y emoji"
           >
             <Palette className="size-3.5" />
           </Button>
@@ -199,6 +222,31 @@ function GroupMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Users className="size-3.5" />
+              Cliente
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuLabel className="text-muted-foreground text-[11px]">
+                Mover a…
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={client ?? ""}
+                onValueChange={(v) => clientMutation.mutate(v || null)}
+              >
+                <DropdownMenuRadioItem value="">
+                  Sin cliente
+                </DropdownMenuRadioItem>
+                {clientNames.map((c) => (
+                  <DropdownMenuRadioItem key={c} value={c}>
+                    {c}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => {
               if (
@@ -226,18 +274,22 @@ type ClientProject = {
 };
 
 export function ClientGroup({
+  clientKey,
   client,
   projects,
   canEdit,
   density,
   clientNames = [],
+  onNewProject,
   defaultOpen = true,
 }: {
+  clientKey: string | null;
   client: string;
   projects: ClientProject[];
   canEdit: boolean;
   density: DensityMode;
   clientNames?: string[];
+  onNewProject?: (client: string | null) => void;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = React.useState(defaultOpen);
@@ -378,6 +430,21 @@ export function ClientGroup({
               </div>
             );
           })}
+          {canEdit && onNewProject ? (
+            <button
+              type="button"
+              onClick={() => onNewProject(clientKey)}
+              className="text-muted-foreground hover:text-foreground hover:bg-accent/50 flex w-full items-center gap-2 px-3 py-2.5 text-sm transition-colors"
+            >
+              <FolderPlus className="size-3.5" />
+              Nuevo proyecto
+              {client && clientKey !== null ? (
+                <span className="text-muted-foreground/70 truncate">
+                  en {client}
+                </span>
+              ) : null}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </section>

@@ -17,16 +17,18 @@ import {
   ArrowDown,
   ArrowUp,
   Download,
+  FolderPlus,
   Plus,
   RefreshCw,
   Rows3,
   Search,
+  Users,
   X,
 } from "lucide-react";
 
 import {
   createClientAction,
-  createProjectItemAction,
+  createProjectAction,
   deleteClientAction,
   reorderProjectItemsAction,
 } from "@/app/actions/projects";
@@ -45,6 +47,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
 import { showToast } from "@/components/ui/toast";
 import {
   PROJECT_ITEM_CATEGORIES,
@@ -74,6 +77,11 @@ type View = "active" | "archive";
 /** Sentinel filter/group value for projects with no client assigned. */
 const NO_CLIENT = "__none__";
 
+const selectClass = cn(
+  "border-input dark:bg-input/30 focus-visible:border-ring focus-visible:ring-ring/50",
+  "h-9 w-full rounded-md border bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]",
+);
+
 export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
   const [view, setView] = React.useState<View>("active");
   const query = useProjectBoard({ archiveMode: view });
@@ -91,7 +99,15 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
   const [search, setSearch] = React.useState("");
   const [density, setDensity] = React.useState<DensityMode>("comfortable");
   const searchRef = React.useRef<HTMLInputElement>(null);
-  const [newOpen, setNewOpen] = React.useState(false);
+
+  // Top-down creation: a single dialog creates a project + its first task,
+  // optionally pre-scoped to a client. `newProjectClient` is the preset and
+  // `newProjectKey` remounts the dialog on each open so its fields reset.
+  const [newProjectOpen, setNewProjectOpen] = React.useState(false);
+  const [newProjectClient, setNewProjectClient] = React.useState<string | null>(
+    null,
+  );
+  const [newProjectKey, setNewProjectKey] = React.useState(0);
 
   const items = React.useMemo(
     () => query.data?.data.items ?? [],
@@ -193,6 +209,25 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     [clientGroups, selectedClient],
   );
 
+  /** The concrete client currently in focus, or null for "Todos"/"Sin cliente". */
+  const focusedClient =
+    selectedClient && selectedClient !== NO_CLIENT ? selectedClient : null;
+
+  const openNewProject = React.useCallback(
+    (preset?: string | null) => {
+      const def =
+        preset !== undefined
+          ? preset
+          : selectedClient && selectedClient !== NO_CLIENT
+            ? selectedClient
+            : null;
+      setNewProjectClient(def);
+      setNewProjectKey((k) => k + 1);
+      setNewProjectOpen(true);
+    },
+    [selectedClient],
+  );
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, {
@@ -251,7 +286,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
         searchRef.current?.focus();
       } else if (canEdit && (e.key === "n" || e.key === "N")) {
         e.preventDefault();
-        setNewOpen(true);
+        openNewProject();
       } else if (e.key === "a" || e.key === "A") {
         e.preventDefault();
         setView((v) => (v === "active" ? "archive" : "active"));
@@ -259,7 +294,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canEdit]);
+  }, [canEdit, openNewProject]);
 
   function exportCsv() {
     const rows = [
@@ -296,6 +331,10 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
 
   const inArchive = view === "archive";
   const hasGroups = visibleClientGroups.length > 0;
+  const filtersActive =
+    search.trim().length > 0 ||
+    statuses.length !== PROJECT_ITEM_STATUSES.length ||
+    categories.length !== PROJECT_ITEM_CATEGORIES.length;
 
   return (
     <section className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
@@ -307,7 +346,7 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
           <p className="text-muted-foreground text-xs">
             {inArchive
               ? "Tareas archivadas. Reactivá las que vuelvan a estar en juego."
-              : "Pendientes por cliente. Elegí un cliente arriba para ver sus proyectos y tareas. Visible para todo el equipo; sólo Mariano edita."}
+              : "Elegí un cliente y creá sus proyectos; dentro de cada proyecto cargás las tareas. Visible para todo el equipo; sólo Mariano edita."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -355,21 +394,24 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
             CSV
           </Button>
           {canEdit && !inArchive ? (
-            <NewItemButton
-              open={newOpen}
-              onOpenChange={setNewOpen}
-              existingProjects={items.map((i) => i.project)}
-            />
+            <Button
+              type="button"
+              onClick={() => openNewProject()}
+              title="Nuevo proyecto (N)"
+            >
+              <FolderPlus />
+              Nuevo proyecto
+            </Button>
           ) : null}
         </div>
       </header>
 
-      <ClientTabs
+      <ClientFilterBar
         clients={clients}
         selected={selectedClient}
         onSelect={setSelectedClient}
         hasUnassigned={hasUnassigned}
-        canEdit={canEdit && !inArchive}
+        canManage={canEdit && !inArchive}
       />
 
       <div className="flex flex-col gap-2">
@@ -401,11 +443,18 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
       {query.isLoading ? (
         <p className="text-muted-foreground text-sm">Cargando board…</p>
       ) : !hasGroups ? (
-        <EmptyState
-          canEdit={canEdit}
-          hasItems={items.length > 0}
-          archive={inArchive}
-        />
+        focusedClient && canEdit && !inArchive && !filtersActive ? (
+          <ClientEmptyState
+            client={focusedClient}
+            onNewProject={() => openNewProject(focusedClient)}
+          />
+        ) : (
+          <EmptyState
+            canEdit={canEdit}
+            hasItems={items.length > 0}
+            archive={inArchive}
+          />
+        )
       ) : (
         <DndContext
           sensors={sensors}
@@ -416,37 +465,109 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
             {visibleClientGroups.map((cg) => (
               <ClientGroup
                 key={cg.key}
+                clientKey={cg.key === NO_CLIENT ? null : cg.key}
                 client={cg.client}
                 projects={cg.projects}
                 canEdit={canEdit && !inArchive}
                 density={density}
                 clientNames={clientNames}
+                onNewProject={openNewProject}
               />
             ))}
           </div>
         </DndContext>
       )}
 
+      {canEdit ? (
+        <NewProjectDialog
+          key={newProjectKey}
+          open={newProjectOpen}
+          onOpenChange={setNewProjectOpen}
+          clients={clientNames}
+          defaultClient={newProjectClient}
+        />
+      ) : null}
+
       <KeyboardHint canEdit={canEdit} />
     </section>
   );
 }
 
-function ClientTabs({
+function ClientFilterBar({
   clients,
   selected,
   onSelect,
   hasUnassigned,
-  canEdit,
+  canManage,
 }: {
   clients: Client[];
   selected: string | null;
   onSelect: (next: string | null) => void;
   hasUnassigned: boolean;
-  canEdit: boolean;
+  canManage: boolean;
+}) {
+  function pillClass(active: boolean) {
+    return cn(
+      "inline-flex h-7 items-center gap-1 rounded-full border px-3 text-xs font-medium transition-colors",
+      active
+        ? "border-primary bg-primary text-primary-foreground"
+        : "bg-background hover:bg-accent",
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+        Cliente
+      </span>
+
+      <button
+        type="button"
+        onClick={() => onSelect(null)}
+        className={pillClass(selected === null)}
+      >
+        Todos
+      </button>
+
+      {clients.map((c) => (
+        <button
+          key={c.name}
+          type="button"
+          onClick={() => onSelect(c.name)}
+          className={cn(pillClass(selected === c.name), "max-w-[14rem] truncate")}
+        >
+          {c.name}
+        </button>
+      ))}
+
+      {hasUnassigned ? (
+        <button
+          type="button"
+          onClick={() => onSelect(NO_CLIENT)}
+          className={pillClass(selected === NO_CLIENT)}
+        >
+          Sin cliente
+        </button>
+      ) : null}
+
+      {canManage ? (
+        <ManageClients clients={clients} selected={selected} onSelect={onSelect} />
+      ) : null}
+    </div>
+  );
+}
+
+function ManageClients({
+  clients,
+  selected,
+  onSelect,
+}: {
+  clients: Client[];
+  selected: string | null;
+  onSelect: (next: string | null) => void;
 }) {
   const qc = useQueryClient();
-  const [addOpen, setAddOpen] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState("");
 
   const createMutation = useMutation({
@@ -457,7 +578,6 @@ function ClientTabs({
     },
     onSuccess: (data) => {
       setName("");
-      setAddOpen(false);
       qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
       onSelect(data.name);
     },
@@ -482,122 +602,208 @@ function ClientTabs({
     if (trimmed) createMutation.mutate(trimmed);
   }
 
-  function pillClass(active: boolean) {
-    return cn(
-      "inline-flex h-7 items-center gap-1 rounded-full border px-3 text-xs font-medium transition-colors",
-      active
-        ? "border-primary bg-primary text-primary-foreground"
-        : "bg-background hover:bg-accent",
-    );
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="text-muted-foreground h-7 gap-1.5 px-2"
+          title="Gestionar clientes"
+        >
+          <Users className="size-3.5" />
+          Gestionar
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 space-y-3">
+        <div className="text-xs font-medium">Gestionar clientes</div>
+        <div className="flex items-center gap-2">
+          <Input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add();
+              }
+            }}
+            placeholder="Nuevo cliente…"
+            className="h-9"
+          />
+          <Button
+            type="button"
+            size="icon"
+            onClick={add}
+            disabled={!name.trim() || createMutation.isPending}
+            aria-label="Agregar cliente"
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        </div>
+
+        {clients.length > 0 ? (
+          <ul className="max-h-64 space-y-0.5 overflow-auto">
+            {clients.map((c) => (
+              <li
+                key={c.name}
+                className="hover:bg-accent flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
+              >
+                <span className="truncate text-sm">{c.name}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      confirm(
+                        `¿Quitar el cliente "${c.name}"? Los proyectos asignados quedan sin cliente.`,
+                      )
+                    )
+                      deleteMutation.mutate(c.name);
+                  }}
+                  aria-label={`Quitar ${c.name}`}
+                  className="text-muted-foreground hover:text-destructive inline-flex size-5 shrink-0 items-center justify-center rounded"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted-foreground text-xs">
+            Todavía no hay clientes. Agregá el primero arriba.
+          </p>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function NewProjectDialog({
+  open,
+  onOpenChange,
+  clients,
+  defaultClient,
+}: {
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  clients: string[];
+  defaultClient: string | null;
+}) {
+  const qc = useQueryClient();
+  const [name, setName] = React.useState("");
+  const [title, setTitle] = React.useState("");
+  const [category, setCategory] =
+    React.useState<ProjectItemCategory>("otros");
+  const [client, setClient] = React.useState<string>(defaultClient ?? "");
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const result = await createProjectAction({
+        name: name.trim(),
+        client: client || null,
+        title: title.trim(),
+        category,
+      });
+      if (!result.ok) throw new Error(result.message);
+      return result.data;
+    },
+    onSuccess: () => {
+      onOpenChange(false);
+      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
+    },
+    onError: (err: Error) => showToast({ title: err.message }),
+  });
+
+  const canSubmit =
+    name.trim().length > 0 &&
+    title.trim().length > 0 &&
+    !createMutation.isPending;
+
+  function submit() {
+    if (!canSubmit) return;
+    createMutation.mutate();
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
-        Cliente
-      </span>
-
-      <button
-        type="button"
-        onClick={() => onSelect(null)}
-        className={pillClass(selected === null)}
-      >
-        Todos
-      </button>
-
-      {clients.map((c) => {
-        const active = selected === c.name;
-        return (
-          <span
-            key={c.name}
-            className={cn(pillClass(active), canEdit && "pr-1")}
+    <ResponsiveDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Nuevo proyecto"
+      description="Creá el proyecto y su primera tarea. Después sumás más tareas dentro del proyecto."
+    >
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <label className="text-muted-foreground text-xs font-medium">
+            Cliente
+          </label>
+          <select
+            value={client}
+            onChange={(e) => setClient(e.target.value)}
+            className={selectClass}
+            aria-label="Cliente del proyecto"
           >
-            <button
-              type="button"
-              onClick={() => onSelect(c.name)}
-              className="max-w-[12rem] truncate"
-            >
-              {c.name}
-            </button>
-            {canEdit ? (
-              <button
-                type="button"
-                onClick={() => {
-                  if (
-                    confirm(
-                      `¿Quitar el cliente "${c.name}"? Los proyectos asignados quedan sin cliente.`,
-                    )
-                  )
-                    deleteMutation.mutate(c.name);
-                }}
-                aria-label={`Quitar ${c.name}`}
-                className={cn(
-                  "inline-flex size-4 items-center justify-center rounded-full",
-                  active
-                    ? "hover:bg-primary-foreground/20"
-                    : "text-muted-foreground hover:text-destructive",
-                )}
-              >
-                <X className="size-3" />
-              </button>
-            ) : null}
-          </span>
-        );
-      })}
+            <option value="">Sin cliente</option>
+            {clients.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      {hasUnassigned ? (
-        <button
-          type="button"
-          onClick={() => onSelect(NO_CLIENT)}
-          className={pillClass(selected === NO_CLIENT)}
-        >
-          Sin cliente
-        </button>
-      ) : null}
+        <div className="space-y-1">
+          <label className="text-muted-foreground text-xs font-medium">
+            Nombre del proyecto
+          </label>
+          <Input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Ej: Campaña Verano"
+          />
+        </div>
 
-      {canEdit ? (
-        <Popover open={addOpen} onOpenChange={setAddOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              className="size-7 rounded-full"
-              aria-label="Agregar cliente"
+        <div className="space-y-1">
+          <label className="text-muted-foreground text-xs font-medium">
+            Primera tarea
+          </label>
+          <div className="flex items-center gap-2">
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              placeholder="Descripción corta"
+            />
+            <select
+              value={category}
+              onChange={(e) =>
+                setCategory(e.target.value as ProjectItemCategory)
+              }
+              className={cn(selectClass, "w-28")}
+              aria-label="Categoría"
             >
-              <Plus className="size-3.5" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-64 space-y-2">
-            <div className="text-xs font-medium">Nuevo cliente</div>
-            <div className="flex items-center gap-2">
-              <Input
-                autoFocus
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    add();
-                  }
-                }}
-                placeholder="Nombre del cliente…"
-                className="h-9"
-              />
-              <Button
-                type="button"
-                size="icon"
-                onClick={add}
-                disabled={!name.trim() || createMutation.isPending}
-                aria-label="Agregar"
-              >
-                <Plus className="size-3.5" />
-              </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
-      ) : null}
-    </div>
+              {PROJECT_ITEM_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {PROJECT_ITEM_CATEGORY_LABEL[c]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-1">
+          <Button type="button" onClick={submit} disabled={!canSubmit}>
+            Crear proyecto
+          </Button>
+        </div>
+      </div>
+    </ResponsiveDialog>
   );
 }
 
@@ -623,6 +829,31 @@ function DensityToggle({
   );
 }
 
+function ClientEmptyState({
+  client,
+  onNewProject,
+}: {
+  client: string;
+  onNewProject: () => void;
+}) {
+  return (
+    <div className="bg-muted/30 flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center">
+      <div>
+        <p className="text-sm font-medium">
+          «{client}» todavía no tiene proyectos
+        </p>
+        <p className="text-muted-foreground text-xs">
+          Creá el primer proyecto de este cliente para arrancar a cargar tareas.
+        </p>
+      </div>
+      <Button type="button" onClick={onNewProject}>
+        <FolderPlus />
+        Nuevo proyecto
+      </Button>
+    </div>
+  );
+}
+
 function EmptyState({
   canEdit,
   hasItems,
@@ -639,7 +870,7 @@ function EmptyState({
           ? "Sin resultados con estos filtros"
           : archive
             ? "Nada archivado todavía"
-            : "Sin tareas todavía"}
+            : "Sin proyectos todavía"}
       </p>
       <p className="text-muted-foreground text-xs">
         {hasItems
@@ -647,8 +878,8 @@ function EmptyState({
           : archive
             ? "Cuando archives tareas las vas a ver acá."
             : canEdit
-              ? "Tocá Nueva tarea o presioná N para arrancar."
-              : "Cuando Mariano cargue tareas las vas a ver acá."}
+              ? "Tocá Nuevo proyecto o presioná N para arrancar."
+              : "Cuando Mariano cargue proyectos los vas a ver acá."}
       </p>
     </div>
   );
@@ -661,7 +892,7 @@ function KeyboardHint({ canEdit }: { canEdit: boolean }) {
       {canEdit ? (
         <>
           {" · "}
-          <Kbd>N</Kbd> nueva
+          <Kbd>N</Kbd> nuevo proyecto
         </>
       ) : null}{" "}
       · <Kbd>A</Kbd> archivo
@@ -674,108 +905,5 @@ function Kbd({ children }: { children: React.ReactNode }) {
     <kbd className="bg-muted text-muted-foreground rounded border px-1 py-0.5 text-[10px] font-medium">
       {children}
     </kbd>
-  );
-}
-
-function NewItemButton({
-  open,
-  onOpenChange,
-  existingProjects,
-}: {
-  open: boolean;
-  onOpenChange: (next: boolean) => void;
-  existingProjects: string[];
-}) {
-  const qc = useQueryClient();
-  const [project, setProject] = React.useState("");
-  const [title, setTitle] = React.useState("");
-
-  const uniqueProjects = React.useMemo(
-    () =>
-      Array.from(new Set(existingProjects)).sort((a, b) =>
-        a.localeCompare(b, "es"),
-      ),
-    [existingProjects],
-  );
-
-  const createMutation = useMutation({
-    mutationFn: async () => {
-      const result = await createProjectItemAction({
-        project: project.trim(),
-        title: title.trim(),
-      });
-      if (!result.ok) throw new Error(result.message);
-      return result.data;
-    },
-    onSuccess: () => {
-      setProject("");
-      setTitle("");
-      onOpenChange(false);
-      qc.invalidateQueries({ queryKey: PROJECT_ITEMS_KEY });
-    },
-    onError: (err: Error) => showToast({ title: err.message }),
-  });
-
-  function submit() {
-    if (!project.trim() || !title.trim()) return;
-    createMutation.mutate();
-  }
-
-  return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <Button type="button" title="Nueva tarea (N)">
-          <Plus />
-          Nueva tarea
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 space-y-3">
-        <div className="text-sm font-medium">Nueva tarea</div>
-        <div className="space-y-1">
-          <label className="text-muted-foreground text-xs font-medium">
-            Proyecto
-          </label>
-          <Input
-            list="existing-projects"
-            value={project}
-            onChange={(e) => setProject(e.target.value)}
-            placeholder="Cliente / campaña…"
-            autoFocus
-          />
-          <datalist id="existing-projects">
-            {uniqueProjects.map((p) => (
-              <option key={p} value={p} />
-            ))}
-          </datalist>
-        </div>
-        <div className="space-y-1">
-          <label className="text-muted-foreground text-xs font-medium">
-            Tarea
-          </label>
-          <Input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            placeholder="Descripción corta"
-          />
-        </div>
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            onClick={submit}
-            disabled={
-              !project.trim() || !title.trim() || createMutation.isPending
-            }
-          >
-            Agregar
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
   );
 }
