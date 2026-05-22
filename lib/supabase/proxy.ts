@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   "/boardmely",
   "/boardyiss",
   "/boardmafe",
+  "/boardnadine",
 ];
 const ADMIN_ONLY_PATHS = ["/projects"];
 

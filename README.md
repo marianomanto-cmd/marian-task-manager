@@ -6,11 +6,11 @@ App interna de la agencia. Dos pestañas:
 - **Proyectos** (`/projects`): board de pendientes que Mariano comparte con clientes. Organizado por cliente → proyecto → tareas, con categoría, status, due date, link y nota. Creación top-down: elegís un cliente, creás sus proyectos, y dentro de cada proyecto cargás las tareas. Sólo Mariano edita; todo el equipo lo ve.
 - **Timeliner** (`/timeliner`): creador de timelines/Gantt para el equipo. Varios timelines (pestañas), tareas con duración, hitos, owners (lista del equipo), arrastrar para mover/estirar barras, fines de semana y feriados por país (AR/PA/US/ES) con toggle on/off, y export a Excel (.xlsx con grilla coloreada). Visible y editable por cualquier miembro logueado.
 - **Vista compartida** (`/p/<token>`): link público de sólo lectura para clientes. Se genera/rota/revoca desde el botón "Compartir" en Proyectos.
-- **Boards de clientas** — **Board - Mely** (`/boardmely`), **Board - Yiss** (`/boardyiss`) y **Board - Mafe** (`/boardmafe`): copias independientes del board de Proyectos, una por clienta externa. Son **públicas y sin login** (se accede directo por el link), con edición completa. Usan "Grupos" en vez de "Clientes" y guardan sus datos en tablas aisladas (`mely_*` / `yiss_*` / `mafe_*`). No aparecen en el menú del equipo; sin sesión, la app manda a login (no ven `/projects` ni `/tasks`).
+- **Boards de clientas** — **Board - Mely** (`/boardmely`), **Board - Yiss** (`/boardyiss`), **Board - Mafe** (`/boardmafe`) y **Board - Nadine** (`/boardnadine`): copias independientes del board de Proyectos, una por clienta externa. Son **públicas y sin login** (se accede directo por el link), con edición completa. Usan "Grupos" en vez de "Clientes" y guardan sus datos en tablas aisladas (`mely_*` / `yiss_*` / `mafe_*` / `nadine_*`). No aparecen en el menú del equipo; sin sesión, la app manda a login (no ven `/projects` ni `/tasks`).
 
 Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calendar, ni Slack.
 
-> Los boards de clientas requieren aplicar las migraciones `supabase/migrations/0021_mely_board.sql`, `0022_yiss_board.sql` y `0023_mafe_board.sql`.
+> Los boards de clientas requieren aplicar las migraciones `supabase/migrations/0021_mely_board.sql`, `0022_yiss_board.sql`, `0023_mafe_board.sql` y `0026_nadine_board.sql`.
 >
 > Timeliner requiere aplicar `supabase/migrations/0024_timeliner.sql` (usa la tabla `holidays` ya existente).
 
