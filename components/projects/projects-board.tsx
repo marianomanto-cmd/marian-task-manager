@@ -20,8 +20,6 @@ import {
   MoreHorizontal,
   Plus,
   Search,
-  SlidersHorizontal,
-  Users,
   X,
 } from "lucide-react";
 
@@ -38,6 +36,7 @@ import {
   projectBoardKey,
   useProjectBoard,
 } from "@/components/projects/use-project-items";
+import { FiltersPopover } from "@/components/shell/filters-popover";
 import { FilterChips } from "@/components/tasks/filter-chips";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,11 +46,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
 import { showToast } from "@/components/ui/toast";
 import {
@@ -102,7 +96,6 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     null,
   );
   const [search, setSearch] = React.useState("");
-  const [showFilters, setShowFilters] = React.useState(true);
   const density: DensityMode = "comfortable";
   const searchRef = React.useRef<HTMLInputElement>(null);
 
@@ -346,9 +339,21 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     search.trim().length > 0 ||
     statuses.length !== PROJECT_ITEM_STATUSES.length ||
     categories.length !== PROJECT_ITEM_CATEGORIES.length;
+  // Search lives in its own toolbar input, so the Filtros dot only reflects the
+  // controls tucked inside the popover (client + status + category).
+  const filterPopoverActive =
+    selectedClient !== null ||
+    statuses.length !== PROJECT_ITEM_STATUSES.length ||
+    categories.length !== PROJECT_ITEM_CATEGORIES.length;
+
+  function resetFilters() {
+    setSelectedClient(null);
+    setStatuses([...PROJECT_ITEM_STATUSES]);
+    setCategories([...PROJECT_ITEM_CATEGORIES]);
+  }
 
   return (
-    <section className="mx-auto flex w-full max-w-[80rem] flex-col gap-4 px-3 py-4 md:px-6 md:py-6">
+    <section className="mx-auto flex w-full max-w-[120rem] flex-col gap-4 px-4 py-4 md:px-6 md:py-6 lg:px-8">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
@@ -372,6 +377,22 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
             />
           </div>
 
+          <FiltersPopover active={filterPopoverActive} contentClassName="w-80">
+            <ProjectFilters
+              clients={clients}
+              selectedClient={selectedClient}
+              onSelectClient={setSelectedClient}
+              hasUnassigned={hasUnassigned}
+              canManage={canEdit && !inArchive}
+              statuses={statuses}
+              onStatusesChange={setStatuses}
+              categories={categories}
+              onCategoriesChange={setCategories}
+              active={filterPopoverActive}
+              onReset={resetFilters}
+            />
+          </FiltersPopover>
+
           {/* Desktop toolbar */}
           <div className="hidden items-center gap-1.5 md:flex">
             <Button
@@ -383,16 +404,6 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
             >
               <Archive />
               {inArchive ? "Volver" : "Archivo"}
-            </Button>
-            <Button
-              type="button"
-              variant={showFilters ? "outline" : "default"}
-              size="sm"
-              onClick={() => setShowFilters((v) => !v)}
-              title={showFilters ? "Ocultar filtros" : "Mostrar filtros"}
-            >
-              <SlidersHorizontal />
-              Filtros
             </Button>
             {canEdit && !inArchive ? <ShareButton /> : null}
             <Button
@@ -428,10 +439,6 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
                 <Archive className="size-4" />
                 {inArchive ? "Volver al activo" : "Ver archivo"}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowFilters((v) => !v)}>
-                <SlidersHorizontal className="size-4" />
-                {showFilters ? "Ocultar filtros" : "Mostrar filtros"}
-              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={exportCsv}
                 disabled={items.length === 0}
@@ -455,31 +462,6 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
           ) : null}
         </div>
       </header>
-
-      <ClientFilterBar
-        clients={clients}
-        selected={selectedClient}
-        onSelect={setSelectedClient}
-        hasUnassigned={hasUnassigned}
-        canManage={canEdit && !inArchive}
-      />
-
-      {showFilters ? (
-        <div className="flex flex-col gap-2">
-          <FilterChips<ProjectItemStatus>
-            label="Status"
-            options={STATUS_OPTIONS}
-            selected={statuses}
-            onChange={setStatuses}
-          />
-          <FilterChips<ProjectItemCategory>
-            label="Categoría"
-            options={CATEGORY_OPTIONS}
-            selected={categories}
-            onChange={setCategories}
-          />
-        </div>
-      ) : null}
 
       {query.data?.authRequired ? (
         <p className="text-destructive text-sm" role="alert">
@@ -547,71 +529,118 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-function ClientFilterBar({
-  clients,
-  selected,
-  onSelect,
-  hasUnassigned,
-  canManage,
-}: {
-  clients: Client[];
-  selected: string | null;
-  onSelect: (next: string | null) => void;
-  hasUnassigned: boolean;
-  canManage: boolean;
-}) {
-  function pillClass(active: boolean) {
-    return cn(
-      "inline-flex h-7 items-center gap-1 rounded-full border px-3 text-xs font-medium transition-colors",
-      active
-        ? "border-primary bg-primary text-primary-foreground"
-        : "bg-background hover:bg-accent",
-    );
-  }
+const clientPillClass = (active: boolean) =>
+  cn(
+    "inline-flex h-7 max-w-full items-center gap-1 truncate rounded-full border px-3 text-xs font-medium transition-colors",
+    active
+      ? "border-primary bg-primary text-primary-foreground"
+      : "bg-background hover:bg-accent",
+  );
 
+function FilterSectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
-        Cliente
-      </span>
-
-      <button
-        type="button"
-        onClick={() => onSelect(null)}
-        className={pillClass(selected === null)}
-      >
-        Todos
-      </button>
-
-      {clients.map((c) => (
-        <button
-          key={c.name}
-          type="button"
-          onClick={() => onSelect(c.name)}
-          className={cn(pillClass(selected === c.name), "max-w-[14rem] truncate")}
-        >
-          {c.name}
-        </button>
-      ))}
-
-      {hasUnassigned ? (
-        <button
-          type="button"
-          onClick={() => onSelect(NO_CLIENT)}
-          className={pillClass(selected === NO_CLIENT)}
-        >
-          Sin cliente
-        </button>
-      ) : null}
-
-      {canManage ? (
-        <ManageClients clients={clients} selected={selected} onSelect={onSelect} />
-      ) : null}
-    </div>
+    <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+      {children}
+    </span>
   );
 }
 
-function ManageClients({
+/**
+ * Every board filter, tucked into the toolbar popover so they no longer eat a
+ * couple of rows of vertical space above the content. Search keeps its own
+ * toolbar input since it's the quickest path to a specific task.
+ */
+function ProjectFilters({
+  clients,
+  selectedClient,
+  onSelectClient,
+  hasUnassigned,
+  canManage,
+  statuses,
+  onStatusesChange,
+  categories,
+  onCategoriesChange,
+  active,
+  onReset,
+}: {
+  clients: Client[];
+  selectedClient: string | null;
+  onSelectClient: (next: string | null) => void;
+  hasUnassigned: boolean;
+  canManage: boolean;
+  statuses: ProjectItemStatus[];
+  onStatusesChange: (next: ProjectItemStatus[]) => void;
+  categories: ProjectItemCategory[];
+  onCategoriesChange: (next: ProjectItemCategory[]) => void;
+  active: boolean;
+  onReset: () => void;
+}) {
+  return (
+    <>
+      <div className="space-y-2">
+        <FilterSectionLabel>Cliente</FilterSectionLabel>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => onSelectClient(null)}
+            className={clientPillClass(selectedClient === null)}
+          >
+            Todos
+          </button>
+          {clients.map((c) => (
+            <button
+              key={c.name}
+              type="button"
+              onClick={() => onSelectClient(c.name)}
+              className={cn(clientPillClass(selectedClient === c.name), "max-w-[12rem]")}
+            >
+              {c.name}
+            </button>
+          ))}
+          {hasUnassigned ? (
+            <button
+              type="button"
+              onClick={() => onSelectClient(NO_CLIENT)}
+              className={clientPillClass(selectedClient === NO_CLIENT)}
+            >
+              Sin cliente
+            </button>
+          ) : null}
+        </div>
+        {canManage ? (
+          <InlineClientManager
+            clients={clients}
+            selected={selectedClient}
+            onSelect={onSelectClient}
+          />
+        ) : null}
+      </div>
+
+      <FilterChips<ProjectItemStatus>
+        label="Status"
+        options={STATUS_OPTIONS}
+        selected={statuses}
+        onChange={onStatusesChange}
+      />
+      <FilterChips<ProjectItemCategory>
+        label="Categoría"
+        options={CATEGORY_OPTIONS}
+        selected={categories}
+        onChange={onCategoriesChange}
+      />
+
+      {active ? (
+        <div className="flex justify-end">
+          <Button type="button" size="sm" variant="ghost" onClick={onReset}>
+            Limpiar filtros
+          </Button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function InlineClientManager({
   clients,
   selected,
   onSelect,
@@ -621,7 +650,6 @@ function ManageClients({
   onSelect: (next: string | null) => void;
 }) {
   const qc = useQueryClient();
-  const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState("");
 
   const createMutation = useMutation({
@@ -657,79 +685,64 @@ function ManageClients({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+    <div className="space-y-2 border-t pt-3">
+      <FilterSectionLabel>Gestionar clientes</FilterSectionLabel>
+      <div className="flex items-center gap-2">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+          placeholder="Nuevo cliente…"
+          className="h-9"
+        />
         <Button
           type="button"
-          size="sm"
-          variant="ghost"
-          className="text-muted-foreground h-7 gap-1.5 px-2"
-          title="Gestionar clientes"
+          size="icon"
+          onClick={add}
+          disabled={!name.trim() || createMutation.isPending}
+          aria-label="Agregar cliente"
         >
-          <Users className="size-3.5" />
-          Gestionar
+          <Plus className="size-3.5" />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 space-y-3">
-        <div className="text-xs font-medium">Gestionar clientes</div>
-        <div className="flex items-center gap-2">
-          <Input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                add();
-              }
-            }}
-            placeholder="Nuevo cliente…"
-            className="h-9"
-          />
-          <Button
-            type="button"
-            size="icon"
-            onClick={add}
-            disabled={!name.trim() || createMutation.isPending}
-            aria-label="Agregar cliente"
-          >
-            <Plus className="size-3.5" />
-          </Button>
-        </div>
+      </div>
 
-        {clients.length > 0 ? (
-          <ul className="max-h-64 space-y-0.5 overflow-auto">
-            {clients.map((c) => (
-              <li
-                key={c.name}
-                className="hover:bg-accent flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
-              >
-                <span className="truncate text-sm">{c.name}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (
-                      confirm(
-                        `¿Quitar el cliente "${c.name}"? Los proyectos asignados quedan sin cliente.`,
-                      )
+      {clients.length > 0 ? (
+        <ul className="max-h-48 space-y-0.5 overflow-auto">
+          {clients.map((c) => (
+            <li
+              key={c.name}
+              className="hover:bg-accent flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
+            >
+              <span className="truncate text-sm">{c.name}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    confirm(
+                      `¿Quitar el cliente "${c.name}"? Los proyectos asignados quedan sin cliente.`,
                     )
-                      deleteMutation.mutate(c.name);
-                  }}
-                  aria-label={`Quitar ${c.name}`}
-                  className="text-muted-foreground hover:text-destructive inline-flex size-5 shrink-0 items-center justify-center rounded"
-                >
-                  <X className="size-3.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-muted-foreground text-xs">
-            Todavía no hay clientes. Agregá el primero arriba.
-          </p>
-        )}
-      </PopoverContent>
-    </Popover>
+                  )
+                    deleteMutation.mutate(c.name);
+                }}
+                aria-label={`Quitar ${c.name}`}
+                className="text-muted-foreground hover:text-destructive inline-flex size-5 shrink-0 items-center justify-center rounded"
+              >
+                <X className="size-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground text-xs">
+          Todavía no hay clientes. Agregá el primero arriba.
+        </p>
+      )}
+    </div>
   );
 }
 

@@ -121,3 +121,16 @@
     font-family: var(--font-sans), Arial, Helvetica, sans-serif;
   }
 }
+
+/* Respect the user's reduced-motion preference: neutralize transitions and
+   animations rather than letting decorative motion run (a11y: reduced-motion). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

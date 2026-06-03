@@ -12,7 +12,6 @@ const PUBLIC_PATHS = [
   "/boardmafe",
   "/boardnadine",
 ];
-const ADMIN_ONLY_PATHS = ["/projects"];
 
 function isPathInList(path: string, list: readonly string[]): boolean {
   return list.some((p) => path === p || path.startsWith(`${p}/`));
@@ -72,18 +71,6 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = "/login";
       url.searchParams.set("error", "domain");
-      return NextResponse.redirect(url);
-    }
-
-    // Projects board is admin-only (Mariano). Direct-URL attempts bounce
-    // to /tasks (the team's primary entry point).
-    if (
-      !isPublic &&
-      !isAdminEmail(email) &&
-      isPathInList(path, ADMIN_ONLY_PATHS)
-    ) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/tasks";
       return NextResponse.redirect(url);
     }
 

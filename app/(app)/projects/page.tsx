@@ -15,7 +15,7 @@ export default async function ProjectsPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // The proxy already redirects non-admins; this keeps a defensive guard.
+  // The whole team can view the board; only the admin (Mariano) can edit it.
   const isAdmin = isAdminEmail(user.email);
   return <ProjectsBoard canEdit={isAdmin} />;
 }
