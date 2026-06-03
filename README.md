@@ -16,8 +16,8 @@ Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calen
 
 ### Proyectos: features clave
 
-- Filtros en el toolbar: el botón **"Filtros"** abre un popover con el filtro de **Cliente** (`[Todos] [Cliente] … [Sin cliente]`), **Status** y **Categoría**. Así no roban alto a la lista de proyectos. Un punto en el botón avisa cuando hay filtros activos y "Limpiar filtros" los resetea. La búsqueda queda en su propio campo del toolbar.
-- Gestión de clientes (sólo admin) integrada en el mismo popover de Filtros: agregás/quitás clientes sin abrir otro menú. Quitar un cliente deja sus proyectos como "Sin cliente".
+- Filtros como menús desplegables en el toolbar: **Cliente** (un valor: `Todos` / cliente / `Sin cliente`), **Status** y **Categoría** (multi-select), cada uno en su propio botón `▾`. Un contador en el botón avisa cuántas opciones están acotadas; así los filtros no roban alto a la lista. La búsqueda queda en su propio campo del toolbar.
+- Gestión de clientes (sólo admin) integrada al pie del menú **Cliente**: agregás/quitás clientes sin abrir otro menú. Quitar un cliente deja sus proyectos como "Sin cliente".
 - Crear es top-down: "Nuevo proyecto" (`N`, o el botón `+ Nuevo proyecto` dentro de cada cliente) pide cliente + nombre del proyecto + primera tarea, y deja el proyecto listo. Después sumás más tareas con el campo "Nueva tarea…" al pie de cada proyecto. No quedan proyectos vacíos.
 - El board muestra la jerarquía Cliente → Proyectos → Tareas. Cada cliente es colapsable. Seleccionar un cliente sin proyectos muestra un atajo para crear el primero.
 - Cada proyecto (dentro de su cliente) conserva sus controles: colapsar/expandir, renombrar inline (click en el nombre), color + emoji (ícono de paleta), mover a otro cliente y eliminar (menú `⋯`).

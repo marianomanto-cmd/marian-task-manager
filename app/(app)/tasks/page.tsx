@@ -4,8 +4,7 @@ import * as React from "react";
 import { Archive, Kanban, List, ListChecks, Plus, RefreshCw } from "lucide-react";
 
 import { useCurrentUser } from "@/components/hooks/use-user";
-import { FiltersPopover } from "@/components/shell/filters-popover";
-import { FilterChips } from "@/components/tasks/filter-chips";
+import { FilterMenu } from "@/components/shell/filter-menu";
 import { KanbanBoard } from "@/components/tasks/kanban-board";
 import { TaskForm } from "@/components/tasks/task-form";
 import { TaskRow } from "@/components/tasks/task-row";
@@ -96,18 +95,6 @@ export default function TasksPage() {
   const filteringEmpty =
     view === "list" && (statuses.length === 0 || priorities.length === 0);
   const inArchive = archiveMode === "archive";
-  // Show the "active" dot on the Filtros trigger whenever the user has narrowed
-  // the view away from its defaults (everyone / all statuses / all priorities).
-  const filtersActive =
-    assigneeOverride !== null ||
-    priorities.length !== TASK_PRIORITIES.length ||
-    (view === "list" && statuses.length !== TASK_STATUSES.length);
-
-  function resetFilters() {
-    setAssigneeOverride(currentMemberKey ? [currentMemberKey] : []);
-    setStatuses([...TASK_STATUSES]);
-    setPriorities([...TASK_PRIORITIES]);
-  }
 
   return (
     <section className="mx-auto flex w-full max-w-[120rem] flex-col gap-4 px-4 py-4 md:px-6 md:py-6 lg:px-8">
@@ -130,53 +117,36 @@ export default function TasksPage() {
               </TabsList>
             </Tabs>
           ) : null}
-          <FiltersPopover active={filtersActive}>
-            <FilterChips<string>
-              label="Asignado"
-              options={ASSIGNEE_OPTIONS}
-              selected={assignees}
-              onChange={setAssignees}
+          {currentMemberKey ? (
+            <Button
+              type="button"
+              variant={isMineOnly ? "default" : "outline"}
+              size="sm"
+              onClick={() => setAssignees(isMineOnly ? [] : [currentMemberKey])}
+            >
+              Sólo mías
+            </Button>
+          ) : null}
+          <FilterMenu<string>
+            label="Asignado"
+            options={ASSIGNEE_OPTIONS}
+            selected={assignees}
+            onChange={setAssignees}
+          />
+          {view === "list" ? (
+            <FilterMenu<TaskStatus>
+              label="Estado"
+              options={STATUS_OPTIONS}
+              selected={statuses}
+              onChange={setStatuses}
             />
-            {currentMemberKey ? (
-              <Button
-                type="button"
-                size="sm"
-                variant={isMineOnly ? "default" : "outline"}
-                onClick={() =>
-                  setAssignees(isMineOnly ? [] : [currentMemberKey])
-                }
-                className="h-7 rounded-full px-2.5 text-xs"
-              >
-                {isMineOnly ? "Mostrar todas" : "Sólo mías"}
-              </Button>
-            ) : null}
-            {view === "list" ? (
-              <FilterChips<TaskStatus>
-                label="Estado"
-                options={STATUS_OPTIONS}
-                selected={statuses}
-                onChange={setStatuses}
-              />
-            ) : null}
-            <FilterChips<TaskPriority>
-              label="Prioridad"
-              options={PRIORITY_OPTIONS}
-              selected={priorities}
-              onChange={setPriorities}
-            />
-            {filtersActive ? (
-              <div className="flex justify-end">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={resetFilters}
-                >
-                  Limpiar filtros
-                </Button>
-              </div>
-            ) : null}
-          </FiltersPopover>
+          ) : null}
+          <FilterMenu<TaskPriority>
+            label="Prioridad"
+            options={PRIORITY_OPTIONS}
+            selected={priorities}
+            onChange={setPriorities}
+          />
           <Button
             type="button"
             variant={inArchive ? "default" : "outline"}

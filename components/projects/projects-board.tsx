@@ -36,8 +36,7 @@ import {
   projectBoardKey,
   useProjectBoard,
 } from "@/components/projects/use-project-items";
-import { FiltersPopover } from "@/components/shell/filters-popover";
-import { FilterChips } from "@/components/tasks/filter-chips";
+import { FilterMenu, SingleFilterMenu } from "@/components/shell/filter-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -339,18 +338,18 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
     search.trim().length > 0 ||
     statuses.length !== PROJECT_ITEM_STATUSES.length ||
     categories.length !== PROJECT_ITEM_CATEGORIES.length;
-  // Search lives in its own toolbar input, so the Filtros dot only reflects the
-  // controls tucked inside the popover (client + status + category).
-  const filterPopoverActive =
-    selectedClient !== null ||
-    statuses.length !== PROJECT_ITEM_STATUSES.length ||
-    categories.length !== PROJECT_ITEM_CATEGORIES.length;
 
-  function resetFilters() {
-    setSelectedClient(null);
-    setStatuses([...PROJECT_ITEM_STATUSES]);
-    setCategories([...PROJECT_ITEM_CATEGORIES]);
-  }
+  // Single-select "Cliente" filter, plus the "Sin cliente" bucket when present.
+  const clientOptions = React.useMemo(
+    () => [
+      { value: null as string | null, label: "Todos" },
+      ...clients.map((c) => ({ value: c.name as string | null, label: c.name })),
+      ...(hasUnassigned
+        ? [{ value: NO_CLIENT as string | null, label: "Sin cliente" }]
+        : []),
+    ],
+    [clients, hasUnassigned],
+  );
 
   return (
     <section className="mx-auto flex w-full max-w-[120rem] flex-col gap-4 px-4 py-4 md:px-6 md:py-6 lg:px-8">
@@ -377,21 +376,34 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
             />
           </div>
 
-          <FiltersPopover active={filterPopoverActive} contentClassName="w-80">
-            <ProjectFilters
-              clients={clients}
-              selectedClient={selectedClient}
-              onSelectClient={setSelectedClient}
-              hasUnassigned={hasUnassigned}
-              canManage={canEdit && !inArchive}
-              statuses={statuses}
-              onStatusesChange={setStatuses}
-              categories={categories}
-              onCategoriesChange={setCategories}
-              active={filterPopoverActive}
-              onReset={resetFilters}
-            />
-          </FiltersPopover>
+          <SingleFilterMenu
+            label="Cliente"
+            value={selectedClient}
+            options={clientOptions}
+            onChange={setSelectedClient}
+            contentClassName={canEdit && !inArchive ? "w-72" : undefined}
+            footer={
+              canEdit && !inArchive ? (
+                <InlineClientManager
+                  clients={clients}
+                  selected={selectedClient}
+                  onSelect={setSelectedClient}
+                />
+              ) : null
+            }
+          />
+          <FilterMenu<ProjectItemStatus>
+            label="Status"
+            options={STATUS_OPTIONS}
+            selected={statuses}
+            onChange={setStatuses}
+          />
+          <FilterMenu<ProjectItemCategory>
+            label="Categoría"
+            options={CATEGORY_OPTIONS}
+            selected={categories}
+            onChange={setCategories}
+          />
 
           {/* Desktop toolbar */}
           <div className="hidden items-center gap-1.5 md:flex">
@@ -529,114 +541,11 @@ export function ProjectsBoard({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-const clientPillClass = (active: boolean) =>
-  cn(
-    "inline-flex h-7 max-w-full items-center gap-1 truncate rounded-full border px-3 text-xs font-medium transition-colors",
-    active
-      ? "border-primary bg-primary text-primary-foreground"
-      : "bg-background hover:bg-accent",
-  );
-
 function FilterSectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
       {children}
     </span>
-  );
-}
-
-/**
- * Every board filter, tucked into the toolbar popover so they no longer eat a
- * couple of rows of vertical space above the content. Search keeps its own
- * toolbar input since it's the quickest path to a specific task.
- */
-function ProjectFilters({
-  clients,
-  selectedClient,
-  onSelectClient,
-  hasUnassigned,
-  canManage,
-  statuses,
-  onStatusesChange,
-  categories,
-  onCategoriesChange,
-  active,
-  onReset,
-}: {
-  clients: Client[];
-  selectedClient: string | null;
-  onSelectClient: (next: string | null) => void;
-  hasUnassigned: boolean;
-  canManage: boolean;
-  statuses: ProjectItemStatus[];
-  onStatusesChange: (next: ProjectItemStatus[]) => void;
-  categories: ProjectItemCategory[];
-  onCategoriesChange: (next: ProjectItemCategory[]) => void;
-  active: boolean;
-  onReset: () => void;
-}) {
-  return (
-    <>
-      <div className="space-y-2">
-        <FilterSectionLabel>Cliente</FilterSectionLabel>
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            onClick={() => onSelectClient(null)}
-            className={clientPillClass(selectedClient === null)}
-          >
-            Todos
-          </button>
-          {clients.map((c) => (
-            <button
-              key={c.name}
-              type="button"
-              onClick={() => onSelectClient(c.name)}
-              className={cn(clientPillClass(selectedClient === c.name), "max-w-[12rem]")}
-            >
-              {c.name}
-            </button>
-          ))}
-          {hasUnassigned ? (
-            <button
-              type="button"
-              onClick={() => onSelectClient(NO_CLIENT)}
-              className={clientPillClass(selectedClient === NO_CLIENT)}
-            >
-              Sin cliente
-            </button>
-          ) : null}
-        </div>
-        {canManage ? (
-          <InlineClientManager
-            clients={clients}
-            selected={selectedClient}
-            onSelect={onSelectClient}
-          />
-        ) : null}
-      </div>
-
-      <FilterChips<ProjectItemStatus>
-        label="Status"
-        options={STATUS_OPTIONS}
-        selected={statuses}
-        onChange={onStatusesChange}
-      />
-      <FilterChips<ProjectItemCategory>
-        label="Categoría"
-        options={CATEGORY_OPTIONS}
-        selected={categories}
-        onChange={onCategoriesChange}
-      />
-
-      {active ? (
-        <div className="flex justify-end">
-          <Button type="button" size="sm" variant="ghost" onClick={onReset}>
-            Limpiar filtros
-          </Button>
-        </div>
-      ) : null}
-    </>
   );
 }
 
