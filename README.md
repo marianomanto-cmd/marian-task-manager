@@ -5,6 +5,7 @@ App interna de la agencia. El shell tiene una **barra lateral colapsable** (bot�
 - **Mi board** (`/tasks`): tareas asignables a cualquier miembro del equipo. Cada uno usa su propio board si quiere (filtros "Sólo mías"). Visible para todo el equipo, sin notificaciones externas.
 - **Proyectos** (`/projects`): board de pendientes que Mariano comparte con clientes. Organizado por cliente → proyecto → tareas, con categoría, status, due date, link y nota. Creación top-down: elegís un cliente, creás sus proyectos, y dentro de cada proyecto cargás las tareas. **Sólo Mariano edita; lo ve y navega todo el equipo** (la pestaña ya no está restringida al admin).
 - **Timeliner** (`/timeliner`): creador de timelines/Gantt para el equipo. Varios timelines (pestañas), tareas con duración, hitos, owners (lista del equipo), arrastrar para mover/estirar barras, fines de semana y feriados por país (AR/PA/US/ES) con toggle on/off, y export a Excel (.xlsx con grilla coloreada). Visible y editable por cualquier miembro logueado.
+- **Briefs** (`/briefs`): subís los PDF de los briefs de boosting ("Brief soporte PAGO en Redes Sociales") y Claude los lee —mira la página, así interpreta las casillas tildadas con X (objetivo, KPI, redes)— y arma una tabla lista para el equipo de medios: start/end date, mercados, objetivo, inversión, KPI, metas, link, target audience, redes y un resumen del background. Drag & drop (varios a la vez), edición por fila, y export con "Copiar tabla" (se pega en Sheets/Excel) o "Excel". Compartido por el equipo. Requiere `ANTHROPIC_API_KEY`; el modelo es configurable con `BRIEFS_MODEL` (default Haiku, el más barato).
 - **Vista compartida** (`/p/<token>`): link público de sólo lectura para clientes. Se genera/rota/revoca desde el botón "Compartir" en Proyectos.
 - **Boards de clientas** — **Board - Mely** (`/boardmely`), **Board - Yiss** (`/boardyiss`), **Board - Mafe** (`/boardmafe`) y **Board - Nadine** (`/boardnadine`): copias independientes del board de Proyectos, una por clienta externa. Son **públicas y sin login** (se accede directo por el link), con edición completa. Usan "Grupos" en vez de "Clientes" y guardan sus datos en tablas aisladas (`mely_*` / `yiss_*` / `mafe_*` / `nadine_*`). No aparecen en el menú del equipo; sin sesión, la app manda a login (no ven `/projects` ni `/tasks`).
 
@@ -13,6 +14,8 @@ Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calen
 > Los boards de clientas requieren aplicar las migraciones `supabase/migrations/0021_mely_board.sql`, `0022_yiss_board.sql`, `0023_mafe_board.sql` y `0026_nadine_board.sql`.
 >
 > Timeliner requiere aplicar `supabase/migrations/0024_timeliner.sql` (usa la tabla `holidays` ya existente).
+>
+> Briefs requiere aplicar `supabase/migrations/0027_briefs.sql` y configurar `ANTHROPIC_API_KEY`.
 
 ### Proyectos: features clave
 
