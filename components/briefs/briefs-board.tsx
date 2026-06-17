@@ -8,6 +8,7 @@ import {
   Download,
   FileText,
   Loader2,
+  Play,
   Sparkles,
   Trash2,
   Upload,
@@ -26,15 +27,23 @@ import {
 import { BRIEF_COLUMNS, type Brief } from "@/lib/briefs/types";
 import { cn } from "@/lib/utils";
 
+type UploadStatus = "pending" | "processing" | "error";
 type UploadItem = {
   id: string;
   name: string;
-  status: "processing" | "error";
+  file: File;
+  status: UploadStatus;
   error?: string;
 };
 
 function isPdf(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+function uid(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random()}`;
 }
 
 export function BriefsBoard() {
@@ -44,7 +53,13 @@ export function BriefsBoard() {
   const briefs = React.useMemo(() => query.data?.data ?? [], [query.data?.data]);
 
   const [queue, setQueue] = React.useState<UploadItem[]>([]);
+  const [isProcessing, setIsProcessing] = React.useState(false);
   const [dragging, setDragging] = React.useState(false);
+  // Mirror the queue in a ref so "Comenzar" always reads the latest pending items.
+  const queueRef = React.useRef<UploadItem[]>([]);
+  React.useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
   const [editing, setEditing] = React.useState<Brief | null>(null);
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editorKey, setEditorKey] = React.useState(0);
@@ -60,33 +75,35 @@ export function BriefsBoard() {
     onError: (err: Error) => showToast({ title: err.message }),
   });
 
-  const uploadOne = React.useCallback(
-    async (file: File) => {
-      const id =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random()}`;
-      setQueue((q) => [...q, { id, name: file.name, status: "processing" }]);
+  const processItem = React.useCallback(
+    async (item: UploadItem) => {
+      setQueue((q) =>
+        q.map((x) =>
+          x.id === item.id
+            ? { ...x, status: "processing", error: undefined }
+            : x,
+        ),
+      );
       try {
         const form = new FormData();
-        form.append("file", file);
+        form.append("file", item.file);
         const res = await fetch("/api/briefs", { method: "POST", body: form });
         const json: { brief?: Brief; error?: string } = await res
           .json()
           .catch(() => ({}));
         if (!res.ok) throw new Error(json.error || "No se pudo procesar el brief.");
         await qc.invalidateQueries({ queryKey: BRIEFS_KEY });
-        setQueue((q) => q.filter((item) => item.id !== id));
+        setQueue((q) => q.filter((x) => x.id !== item.id));
       } catch (err) {
         setQueue((q) =>
-          q.map((item) =>
-            item.id === id
+          q.map((x) =>
+            x.id === item.id
               ? {
-                  ...item,
+                  ...x,
                   status: "error",
                   error: err instanceof Error ? err.message : "Error",
                 }
-              : item,
+              : x,
           ),
         );
       }
@@ -94,19 +111,41 @@ export function BriefsBoard() {
     [qc],
   );
 
-  const handleFiles = React.useCallback(
-    async (files: FileList | File[] | null) => {
-      if (!files) return;
-      const pdfs = Array.from(files).filter(isPdf);
-      if (pdfs.length === 0) {
-        showToast({ title: "Subí archivos PDF." });
-        return;
-      }
-      // Sequential: gentler on rate limits and gives row-by-row feedback.
-      for (const file of pdfs) await uploadOne(file);
-    },
-    [uploadOne],
-  );
+  // Manual trigger: process every pending brief, one at a time.
+  const startProcessing = React.useCallback(async () => {
+    if (isProcessing) return;
+    const pending = queueRef.current.filter((x) => x.status === "pending");
+    if (pending.length === 0) return;
+    setIsProcessing(true);
+    for (const item of pending) await processItem(item);
+    setIsProcessing(false);
+  }, [isProcessing, processItem]);
+
+  // Dropping/selecting just queues the files — nothing runs until "Comenzar".
+  const handleFiles = React.useCallback((files: FileList | File[] | null) => {
+    if (!files) return;
+    const pdfs = Array.from(files).filter(isPdf);
+    if (pdfs.length === 0) {
+      showToast({ title: "Subí archivos PDF." });
+      return;
+    }
+    setQueue((q) => [
+      ...q,
+      ...pdfs.map((file) => ({
+        id: uid(),
+        name: file.name,
+        file,
+        status: "pending" as const,
+      })),
+    ]);
+  }, []);
+
+  function removeItem(id: string) {
+    setQueue((q) => q.filter((x) => x.id !== id));
+  }
+  function clearPending() {
+    setQueue((q) => q.filter((x) => x.status !== "pending"));
+  }
 
   function openEditor(brief: Brief) {
     setEditing(brief);
@@ -132,7 +171,7 @@ export function BriefsBoard() {
     );
   }
 
-  const processing = queue.filter((q) => q.status === "processing").length;
+  const pendingCount = queue.filter((q) => q.status === "pending").length;
 
   return (
     <section className="mx-auto flex w-full max-w-[120rem] flex-col gap-4 px-4 py-4 md:px-6 md:py-6 lg:px-8">
@@ -143,9 +182,9 @@ export function BriefsBoard() {
             Briefs
           </h1>
           <p className="text-muted-foreground text-xs">
-            Subí los PDF de los briefs y Claude te arma la tabla lista para
-            pasarle al equipo de medios. Tocá una fila para corregir cualquier
-            dato.
+            Subí los PDF de los briefs, tocá Comenzar y Claude te arma la tabla
+            lista para pasarle al equipo de medios. Tocá una fila para corregir
+            cualquier dato.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -203,7 +242,7 @@ export function BriefsBoard() {
             Soltá los PDF acá o hacé clic para elegir
           </p>
           <p className="text-muted-foreground text-xs">
-            Podés subir varios briefs a la vez · solo PDF
+            Subí varios a la vez · después tocá Comenzar · solo PDF
           </p>
         </div>
         <input
@@ -221,52 +260,105 @@ export function BriefsBoard() {
 
       {/* Upload queue */}
       {queue.length > 0 ? (
-        <ul className="flex flex-col gap-1.5">
-          {queue.map((item) => (
-            <li
-              key={item.id}
-              className={cn(
-                "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
-                item.status === "error"
-                  ? "border-destructive/40 bg-destructive/5"
-                  : "bg-muted/30",
-              )}
-            >
-              {item.status === "processing" ? (
-                <Loader2 className="text-muted-foreground size-4 shrink-0 animate-spin" />
-              ) : (
-                <AlertCircle className="text-destructive size-4 shrink-0" />
-              )}
-              <span className="min-w-0 flex-1 truncate">
-                <span className="font-medium">{item.name}</span>
-                <span
-                  className={cn(
-                    "ml-2 text-xs",
-                    item.status === "error"
-                      ? "text-destructive"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {item.status === "processing"
-                    ? "Procesando con Claude…"
-                    : item.error}
+        <div className="space-y-2">
+          <ul className="flex flex-col gap-1.5">
+            {queue.map((item) => (
+              <li
+                key={item.id}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+                  item.status === "error"
+                    ? "border-destructive/40 bg-destructive/5"
+                    : "bg-muted/30",
+                )}
+              >
+                {item.status === "processing" ? (
+                  <Loader2 className="text-muted-foreground size-4 shrink-0 animate-spin" />
+                ) : item.status === "error" ? (
+                  <AlertCircle className="text-destructive size-4 shrink-0" />
+                ) : (
+                  <FileText className="text-muted-foreground size-4 shrink-0" />
+                )}
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="font-medium">{item.name}</span>
+                  <span
+                    className={cn(
+                      "ml-2 text-xs",
+                      item.status === "error"
+                        ? "text-destructive"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {item.status === "processing"
+                      ? "Procesando con Claude…"
+                      : item.status === "error"
+                        ? item.error
+                        : "En cola"}
+                  </span>
                 </span>
+                {item.status === "error" ? (
+                  <button
+                    type="button"
+                    onClick={() => void processItem(item)}
+                    disabled={isProcessing}
+                    className="text-muted-foreground hover:text-foreground shrink-0 rounded px-1.5 py-0.5 text-xs font-medium disabled:opacity-50"
+                  >
+                    Reintentar
+                  </button>
+                ) : null}
+                {item.status !== "processing" ? (
+                  <button
+                    type="button"
+                    onClick={() => removeItem(item.id)}
+                    disabled={isProcessing}
+                    className="text-muted-foreground hover:text-foreground shrink-0 rounded p-1 disabled:opacity-50"
+                    aria-label="Quitar"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+
+          {pendingCount > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-muted-foreground text-xs">
+                {pendingCount} brief{pendingCount > 1 ? "s" : ""} en cola, sin
+                procesar
               </span>
-              {item.status === "error" ? (
-                <button
+              <div className="flex items-center gap-1.5">
+                <Button
                   type="button"
-                  onClick={() =>
-                    setQueue((q) => q.filter((x) => x.id !== item.id))
-                  }
-                  className="text-muted-foreground hover:text-foreground shrink-0 rounded p-1"
-                  aria-label="Descartar"
+                  size="sm"
+                  variant="ghost"
+                  onClick={clearPending}
+                  disabled={isProcessing}
                 >
-                  <X className="size-3.5" />
-                </button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+                  Limpiar
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void startProcessing()}
+                  disabled={isProcessing}
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="animate-spin" />
+                      Procesando…
+                    </>
+                  ) : (
+                    <>
+                      <Play />
+                      Comenzar ({pendingCount})
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {query.data?.authRequired ? (
@@ -283,7 +375,7 @@ export function BriefsBoard() {
       {query.isLoading ? (
         <p className="text-muted-foreground text-sm">Cargando…</p>
       ) : briefs.length === 0 ? (
-        processing === 0 ? (
+        queue.length === 0 ? (
           <div className="bg-muted/20 flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-14 text-center">
             <div className="bg-muted text-muted-foreground flex size-12 items-center justify-center rounded-full">
               <Sparkles className="size-6" />
