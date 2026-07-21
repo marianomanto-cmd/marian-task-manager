@@ -17,15 +17,19 @@ import {
 } from "date-fns";
 import { es } from "date-fns/locale";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
+import { GripVertical, Trash2 } from "lucide-react";
 
 import {
   deleteTimelineGroupAction,
   renameTimelineGroupAction,
+  reorderTimelineItemsAction,
   updateTimelineItemAction,
 } from "@/app/actions/timeliner";
 import { OwnerDot } from "@/components/timeliner/owner-picker";
-import { TIMELINER_KEY } from "@/components/timeliner/use-timeliner";
+import {
+  TIMELINER_KEY,
+  type TimelinerQueryResult,
+} from "@/components/timeliner/use-timeliner";
 import { Input } from "@/components/ui/input";
 import { showToast } from "@/components/ui/toast";
 import {
@@ -82,6 +86,13 @@ export function GanttChart({
 }) {
   const qc = useQueryClient();
   const [preview, setPreview] = React.useState<Preview>(null);
+  // Vertical drag-to-reorder: which row is being dragged and where it would
+  // land (insertion index in the flat item list). Null when not dragging.
+  const [reorder, setReorder] = React.useState<{
+    id: string;
+    overIndex: number;
+  } | null>(null);
+  const rowElRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
 
   const updateMutation = useMutation({
     mutationFn: async (vars: { id: string; start_date: string; end_date: string }) => {
@@ -91,6 +102,42 @@ export function GanttChart({
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: TIMELINER_KEY }),
     onError: (err: Error) => showToast({ title: err.message }),
+  });
+
+  const reorderMutation = useMutation({
+    mutationFn: async (vars: {
+      items: { id: string; group_id: string | null; position: number }[];
+    }) => {
+      const res = await reorderTimelineItemsAction({
+        timeline_id: timeline.id,
+        items: vars.items,
+      });
+      if (!res.ok) throw new Error(res.message);
+      return res.data;
+    },
+    // Optimistically apply the new positions/groups so the reorder shows
+    // instantly; roll back on error and always resync afterwards.
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: TIMELINER_KEY });
+      const prev = qc.getQueryData<TimelinerQueryResult>(TIMELINER_KEY);
+      qc.setQueryData<TimelinerQueryResult>(TIMELINER_KEY, (old) => {
+        if (!old || old.error !== null) return old;
+        const patch = new Map(vars.items.map((i) => [i.id, i]));
+        const nextItems = old.data.items.map((it) => {
+          const p = patch.get(it.id);
+          return p
+            ? { ...it, position: p.position, group_id: p.group_id }
+            : it;
+        });
+        return { ...old, data: { ...old.data, items: nextItems } };
+      });
+      return { prev };
+    },
+    onError: (err: Error, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(TIMELINER_KEY, ctx.prev);
+      showToast({ title: err.message });
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: TIMELINER_KEY }),
   });
 
   const today = startOfDay(new Date());
@@ -140,6 +187,19 @@ export function GanttChart({
     return segs;
   }, [days]);
 
+  // Manual vertical order is the source of truth: sort by `position` first so
+  // drag-to-reorder persists, falling back to dates then id for stability.
+  const sortedItems = React.useMemo(
+    () =>
+      [...items].sort((a, b) => {
+        if (a.position !== b.position) return a.position - b.position;
+        if (a.start_date !== b.start_date)
+          return a.start_date < b.start_date ? -1 : 1;
+        return a.id < b.id ? -1 : 1;
+      }),
+    [items],
+  );
+
   // Ordered render rows: group headers interleaved with their items. With no
   // groups, items render flat.
   const rows = React.useMemo(() => {
@@ -148,14 +208,14 @@ export function GanttChart({
       | { type: "item"; item: TimelineItem };
     const out: Row[] = [];
     const byGroup = new Map<string | null, TimelineItem[]>();
-    for (const it of items) {
+    for (const it of sortedItems) {
       const k = it.group_id ?? null;
       if (!byGroup.has(k)) byGroup.set(k, []);
       byGroup.get(k)!.push(it);
     }
     const sortedGroups = [...groups].sort((a, b) => a.position - b.position);
     if (sortedGroups.length === 0) {
-      for (const it of items) out.push({ type: "item", item: it });
+      for (const it of sortedItems) out.push({ type: "item", item: it });
       return out;
     }
     for (const g of sortedGroups) {
@@ -169,7 +229,113 @@ export function GanttChart({
       for (const it of ungrouped) out.push({ type: "item", item: it });
     }
     return out;
-  }, [items, groups]);
+  }, [sortedItems, groups]);
+
+  // Flat list of items in the exact top-to-bottom order they render, and a
+  // lookup of each item's index within it — the basis for reorder math.
+  const orderedItems = React.useMemo(() => {
+    const out: TimelineItem[] = [];
+    for (const r of rows) if (r.type === "item") out.push(r.item);
+    return out;
+  }, [rows]);
+  const itemIndexById = React.useMemo(() => {
+    const m = new Map<string, number>();
+    orderedItems.forEach((it, i) => m.set(it.id, i));
+    return m;
+  }, [orderedItems]);
+
+  // While dragging, suppress the drop line when the target is the row's own
+  // slot (dropping there changes nothing) so it doesn't flicker beside it.
+  const reorderFromIndex = reorder
+    ? itemIndexById.get(reorder.id) ?? -1
+    : -1;
+  const reorderIsNoop =
+    reorder !== null &&
+    (reorder.overIndex === reorderFromIndex ||
+      reorder.overIndex === reorderFromIndex + 1);
+
+  /** Persist a drop: the dragged row lands at insertion index `overIndex`. */
+  function commitReorder(id: string, overIndex: number) {
+    const from = orderedItems.findIndex((i) => i.id === id);
+    if (from < 0) return;
+    // Dropped back into its own slot → nothing to do.
+    if (overIndex === from || overIndex === from + 1) return;
+
+    const dragged = orderedItems[from];
+    const without = orderedItems.filter((_, k) => k !== from);
+    let insertAt = overIndex <= from ? overIndex : overIndex - 1;
+    insertAt = Math.max(0, Math.min(insertAt, without.length));
+
+    // Adopt the group of the neighbour it's dropped next to (above first,
+    // else below), so dragging across group sections moves it there too.
+    const above = without[insertAt - 1];
+    const below = without[insertAt];
+    const newGroupId = above
+      ? above.group_id
+      : below
+        ? below.group_id
+        : dragged.group_id;
+
+    const finalOrder = [
+      ...without.slice(0, insertAt),
+      { ...dragged, group_id: newGroupId },
+      ...without.slice(insertAt),
+    ];
+
+    // Send only the rows whose position or group actually changed.
+    const changed = finalOrder
+      .map((it, idx) => ({ it, idx }))
+      .filter(({ it, idx }) => {
+        const orig = orderedItems.find((o) => o.id === it.id)!;
+        return (
+          orig.position !== idx ||
+          (orig.group_id ?? null) !== (it.group_id ?? null)
+        );
+      })
+      .map(({ it, idx }) => ({
+        id: it.id,
+        group_id: it.group_id ?? null,
+        position: idx,
+      }));
+
+    if (changed.length === 0) return;
+    reorderMutation.mutate({ items: changed });
+  }
+
+  /** Start a vertical drag from a row's grip handle. */
+  function startReorder(e: React.PointerEvent, item: TimelineItem) {
+    e.preventDefault();
+    e.stopPropagation();
+    const from = orderedItems.findIndex((i) => i.id === item.id);
+    if (from < 0) return;
+    let over = from;
+    setReorder({ id: item.id, overIndex: from });
+
+    function computeOver(clientY: number): number {
+      for (let k = 0; k < orderedItems.length; k++) {
+        const el = rowElRefs.current.get(orderedItems[k].id);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) return k;
+      }
+      return orderedItems.length;
+    }
+
+    function onMove(ev: PointerEvent) {
+      over = computeOver(ev.clientY);
+      setReorder((d) => (d ? { ...d, overIndex: over } : d));
+    }
+
+    function onUp() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setReorder(null);
+      commitReorder(item.id, over);
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
 
   function startDrag(
     e: React.PointerEvent,
@@ -319,36 +485,82 @@ export function GanttChart({
             const colors = ownerColors(item.owner_key);
             const ownerLabel = ownerInfo(item.owner_key)?.label ?? "Sin owner";
             const isMilestone = item.kind === "milestone";
+            const myIndex = itemIndexById.get(item.id) ?? 0;
+            const isDragging = reorder?.id === item.id;
+            const showDropAbove =
+              reorder !== null &&
+              !reorderIsNoop &&
+              reorder.overIndex === myIndex;
+            const showDropBelow =
+              reorder !== null &&
+              !reorderIsNoop &&
+              myIndex === orderedItems.length - 1 &&
+              reorder.overIndex === orderedItems.length;
 
             return (
               <div
                 key={item.id}
-                className="group flex border-b last:border-b-0"
+                ref={(el) => {
+                  // Ref callbacks run at commit; storing the row node here for
+                  // later geometry (drag math) is safe, not a render-time read.
+                  // eslint-disable-next-line react-hooks/refs
+                  const m = rowElRefs.current;
+                  if (el) m.set(item.id, el);
+                  else m.delete(item.id);
+                }}
+                className={cn(
+                  "group relative flex border-b last:border-b-0",
+                  isDragging && "opacity-40",
+                )}
                 style={{ height: ROW_H }}
               >
-                <button
-                  type="button"
-                  onClick={() => onEditItem(item)}
-                  className="bg-card hover:bg-muted/50 sticky left-0 z-10 flex shrink-0 items-center gap-2 border-r px-3 text-left transition-colors"
+                {showDropAbove ? (
+                  <div className="bg-primary pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5 -translate-y-px" />
+                ) : null}
+                {showDropBelow ? (
+                  <div className="bg-primary pointer-events-none absolute inset-x-0 bottom-0 z-30 h-0.5 translate-y-px" />
+                ) : null}
+                <div
+                  className="bg-card sticky left-0 z-10 flex shrink-0 items-stretch border-r"
                   style={{ width: LEFT_W }}
                 >
-                  {isMilestone ? (
-                    <span className={cn("size-3 rotate-45 rounded-[2px]", colors.barBg)} />
-                  ) : (
-                    <OwnerDot ownerKey={item.owner_key} />
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">
-                      {item.title}
-                    </span>
-                    <span className="text-muted-foreground block truncate text-[11px]">
-                      {ownerLabel} ·{" "}
-                      {isMilestone
-                        ? format(parseISO(item.start_date), "d MMM", { locale: es })
-                        : `${format(parseISO(item.start_date), "d MMM", { locale: es })} – ${format(parseISO(item.end_date), "d MMM", { locale: es })}`}
-                    </span>
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    aria-label="Arrastrar para reordenar"
+                    title="Arrastrá para reordenar"
+                    onPointerDown={(e) => {
+                      // Reads the row refs only inside deferred pointer handlers.
+                      // eslint-disable-next-line react-hooks/refs
+                      startReorder(e, item);
+                    }}
+                    className="text-muted-foreground/30 hover:text-foreground flex shrink-0 cursor-grab touch-none items-center pl-1.5 pr-0.5 transition-colors active:cursor-grabbing"
+                  >
+                    <GripVertical className="size-3.5" />
                   </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => onEditItem(item)}
+                    className="hover:bg-muted/50 flex min-w-0 flex-1 items-center gap-2 pr-3 pl-0.5 text-left transition-colors"
+                  >
+                    {isMilestone ? (
+                      <span className={cn("size-3 rotate-45 rounded-[2px]", colors.barBg)} />
+                    ) : (
+                      <OwnerDot ownerKey={item.owner_key} />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        {item.title}
+                      </span>
+                      <span className="text-muted-foreground block truncate text-[11px]">
+                        {ownerLabel} ·{" "}
+                        {isMilestone
+                          ? format(parseISO(item.start_date), "d MMM", { locale: es })
+                          : `${format(parseISO(item.start_date), "d MMM", { locale: es })} – ${format(parseISO(item.end_date), "d MMM", { locale: es })}`}
+                      </span>
+                    </span>
+                  </button>
+                </div>
 
                 <div className="relative" style={{ width: gridWidth }}>
                   <div className="absolute inset-0 flex">

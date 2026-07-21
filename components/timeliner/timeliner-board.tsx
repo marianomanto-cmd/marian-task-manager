@@ -162,8 +162,9 @@ export function TimelinerBoard() {
           </h1>
           <p className="text-muted-foreground text-xs">
             Armá el cronograma del proyecto: tareas con duración, hitos y
-            owners. Arrastrá las barras para mover o estirar. Visible y editable
-            por el equipo.
+            owners. Arrastrá las barras para mover o estirar, y usá la
+            manija ⋮⋮ de la izquierda para reordenar las filas. Visible y
+            editable por el equipo.
           </p>
         </div>
         {selected ? (

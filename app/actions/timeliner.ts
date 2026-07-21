@@ -74,6 +74,19 @@ const updateItemSchema = z
     { message: "La fecha de fin no puede ser anterior al inicio", path: ["end_date"] },
   );
 
+const reorderItemsSchema = z.object({
+  timeline_id: z.string().uuid(),
+  items: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        group_id: z.string().uuid().nullable(),
+        position: z.number().int().min(0),
+      }),
+    )
+    .max(1000),
+});
+
 function asInvalid(message: string): ActionResult<never> {
   return { ok: false, code: "invalid_input", message };
 }
@@ -130,8 +143,8 @@ export async function getTimelinerAction(): Promise<
       supabase
         .from("timeline_items")
         .select(ITEM_COLUMNS)
-        .order("start_date", { ascending: true })
-        .order("position", { ascending: true }),
+        .order("position", { ascending: true })
+        .order("start_date", { ascending: true }),
       supabase
         .from("timeline_groups")
         .select(GROUP_COLUMNS)
@@ -418,6 +431,38 @@ export async function updateTimelineItemAction(
       .single();
     if (error) throw new Error(error.message);
     return { ok: true, data: data as TimelineItem };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+/**
+ * Persist a new vertical ordering (and group assignment) for a batch of items.
+ * The client sends only the rows whose position or group changed; each is
+ * updated in place. Scoped to a single timeline for safety.
+ */
+export async function reorderTimelineItemsAction(
+  input: unknown,
+): Promise<ActionResult<{ count: number }>> {
+  const parsed = reorderItemsSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+  const auth = await requireUser();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const results = await Promise.all(
+      parsed.data.items.map((it) =>
+        supabase
+          .from("timeline_items")
+          .update({ position: it.position, group_id: it.group_id })
+          .eq("id", it.id)
+          .eq("timeline_id", parsed.data.timeline_id),
+      ),
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) throw new Error(failed.error.message);
+    return { ok: true, data: { count: parsed.data.items.length } };
   } catch (err) {
     return asUnknown(err);
   }
