@@ -143,6 +143,11 @@ export type ProjectMeta = {
 export type Client = {
   name: string;
   position: number;
+  /**
+   * URL segment for this client's public link (`copa` -> /copa). Null only
+   * for rows created before slugs existed.
+   */
+  slug?: string | null;
 };
 
 /**

@@ -5,6 +5,13 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/actions/result";
 import { isAdminEmail } from "@/lib/auth/admin";
 import {
+  SLUG_MAX_LENGTH,
+  SLUG_MIN_LENGTH,
+  checkSlug,
+  isReservedSlug,
+  slugify,
+} from "@/lib/projects/slug";
+import {
   PROJECT_COLORS,
   PROJECT_ITEM_CATEGORIES,
   PROJECT_ITEM_STATUSES,
@@ -103,6 +110,11 @@ const clientNameSchema = z
   .trim()
   .min(1, "Falta el nombre del cliente")
   .max(120);
+
+const clientSlugSchema = z.object({
+  name: clientNameSchema,
+  slug: z.string().trim().max(SLUG_MAX_LENGTH),
+});
 
 export type ListProjectItemsInput = z.infer<typeof listSchema>;
 export type CreateProjectItemInput = z.infer<typeof createSchema>;
@@ -212,7 +224,7 @@ export async function listProjectBoardAction(
         .order("project", { ascending: true }),
       supabase
         .from("clients")
-        .select("name, position")
+        .select("name, position, slug")
         .order("position", { ascending: true })
         .order("name", { ascending: true }),
     ]);
@@ -659,7 +671,7 @@ export async function listClientsAction(): Promise<ActionResult<Client[]>> {
     const supabase = await createClient();
     const { data, error } = await supabase
       .from("clients")
-      .select("name, position")
+      .select("name, position, slug")
       .order("position", { ascending: true })
       .order("name", { ascending: true });
     if (error) throw new Error(error.message);
@@ -689,15 +701,111 @@ export async function createClientAction(
       .maybeSingle();
     const position = (maxRow?.position ?? -1) + 1;
 
+    // This is an upsert, so it also runs for a client that already exists.
+    // Keep the slug it already has — it may be in a link the client is using.
+    const { data: existing } = await supabase
+      .from("clients")
+      .select("slug")
+      .eq("user_id", auth.userId)
+      .eq("name", parsed.data)
+      .maybeSingle();
+    const slug =
+      (existing?.slug as string | null) ??
+      (await nextFreeSlug(supabase, parsed.data));
+
     const { data, error } = await supabase
       .from("clients")
       .upsert(
-        { user_id: auth.userId, name: parsed.data, position },
+        { user_id: auth.userId, name: parsed.data, position, slug },
         { onConflict: "user_id,name" },
       )
-      .select("name, position")
+      .select("name, position, slug")
       .single();
     if (error) throw new Error(error.message);
+    return { ok: true, data: data as Client };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Pick a free public slug for a new client. Prefers the short first word
+ * ("Copa Airlines" -> copa) and falls back to the full name, then to a
+ * numeric suffix — same order the migration used when backfilling, so links
+ * created later look like the ones created on day one.
+ */
+async function nextFreeSlug(
+  supabase: SupabaseClient,
+  name: string,
+): Promise<string> {
+  let base = slugify(name.split(" ")[0] ?? "");
+  if (base.length < SLUG_MIN_LENGTH || isReservedSlug(base)) {
+    base = slugify(name);
+  }
+  if (base.length < SLUG_MIN_LENGTH) base = "board";
+  base = base.slice(0, SLUG_MAX_LENGTH);
+
+  const { data } = await supabase.from("clients").select("slug");
+  const taken = new Set(
+    ((data ?? []) as { slug: string | null }[])
+      .map((row) => row.slug)
+      .filter((slug): slug is string => Boolean(slug)),
+  );
+
+  let candidate = base;
+  let n = 1;
+  while (taken.has(candidate) || isReservedSlug(candidate)) {
+    n += 1;
+    candidate = `${base}-${n}`;
+  }
+  return candidate;
+}
+
+/**
+ * Change a client's public link. The unique index on `clients.slug` is the
+ * real guard against collisions; the pre-check just turns the race we lose
+ * into a readable message instead of a Postgres error.
+ */
+export async function updateClientSlugAction(
+  input: unknown,
+): Promise<ActionResult<Client>> {
+  const parsed = clientSlugSchema.safeParse(input);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.result;
+
+  const check = checkSlug(parsed.data.slug);
+  if (!check.ok) return asInvalid(check.message);
+
+  try {
+    const supabase = await createClient();
+
+    const { data: clash } = await supabase
+      .from("clients")
+      .select("name")
+      .eq("slug", check.slug)
+      .neq("name", parsed.data.name)
+      .maybeSingle();
+    if (clash) {
+      return asInvalid(`El link "/${check.slug}" ya lo usa otro cliente`);
+    }
+
+    const { data, error } = await supabase
+      .from("clients")
+      .update({ slug: check.slug })
+      .eq("user_id", auth.userId)
+      .eq("name", parsed.data.name)
+      .select("name, position, slug")
+      .single();
+    if (error) {
+      if (error.code === "23505") {
+        return asInvalid(`El link "/${check.slug}" ya está en uso`);
+      }
+      throw new Error(error.message);
+    }
     return { ok: true, data: data as Client };
   } catch (err) {
     return asUnknown(err);

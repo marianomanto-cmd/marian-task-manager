@@ -3,15 +3,14 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { isAdminEmail, isSangriaEmail } from "@/lib/auth/admin";
 
-const PUBLIC_PATHS = [
-  "/login",
-  "/auth/callback",
-  "/p",
-  "/boardmely",
-  "/boardyiss",
-  "/boardmafe",
-  "/boardnadine",
-];
+/**
+ * The team app. Everything else is public: the client links live at the root
+ * of the URL space (`/copa`, `/cmi`, `/todos`, …) and their slugs are stored
+ * in the database, so the proxy can't hold a list of them — it would have to
+ * hit Postgres on every request. Listing what's *private* instead keeps the
+ * check to a string compare, and a slug that matches nothing 404s in the page.
+ */
+const PROTECTED_PATHS = ["/tasks", "/projects", "/briefs", "/timeliner"];
 
 function isPathInList(path: string, list: readonly string[]): boolean {
   return list.some((p) => path === p || path.startsWith(`${p}/`));
@@ -51,7 +50,7 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isPublic = isPathInList(path, PUBLIC_PATHS);
+  const isPublic = !isPathInList(path, PROTECTED_PATHS);
 
   // No session: bounce to /login (unless already there).
   if (!user && !isPublic) {

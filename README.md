@@ -6,7 +6,9 @@ App interna de la agencia. El shell tiene una **barra lateral colapsable** (bot�
 - **Proyectos** (`/projects`): board de pendientes que Mariano comparte con clientes. Organizado por cliente → proyecto → tareas, con categoría, status, due date, link y nota. Creación top-down: elegís un cliente, creás sus proyectos, y dentro de cada proyecto cargás las tareas. **Sólo Mariano edita; lo ve y navega todo el equipo** (la pestaña ya no está restringida al admin).
 - **Timeliner** (`/timeliner`): creador de timelines/Gantt para el equipo. Varios timelines (pestañas), tareas con duración, hitos, owners (lista del equipo), arrastrar para mover/estirar barras, fines de semana y feriados por país (AR/PA/US/ES) con toggle on/off, y export a Excel (.xlsx con grilla coloreada). Visible y editable por cualquier miembro logueado.
 - **Briefs** (`/briefs`): subís los PDF de los briefs de boosting ("Brief soporte PAGO en Redes Sociales") y Claude los lee —mira la página, así interpreta las casillas tildadas con X (objetivo, KPI, redes)— y arma una tabla lista para el equipo de medios: start/end date, mercados, objetivo, inversión, KPI, metas, link, target audience, redes y un resumen del background. Drag & drop (varios a la vez), edición por fila, y export con "Copiar tabla" (se pega en Sheets/Excel) o "Excel". Compartido por el equipo. Requiere `ANTHROPIC_API_KEY`; el modelo es configurable con `BRIEFS_MODEL` (default Haiku, el más barato).
-- **Vista compartida** (`/p/<token>`): link público de sólo lectura para clientes. Se genera/rota/revoca desde el botón "Compartir" en Proyectos.
+- **Link por cliente** (`/copa`, `/cmi`, `/felix`, …): cada cliente de Proyectos tiene su propio link público. **Sin login: se abre con el link y listo.** Cada uno ve **sólo sus proyectos y tareas** — no ve los de los otros clientes (el filtro se aplica en la base, no en el navegador). Es de sólo lectura y no muestra archivadas. Los links salen del botón "Compartir" en Proyectos, donde también se copian y se les cambia el nombre (`/copa` → `/copa-airlines`, lo que quieras).
+- **Todos los clientes** (`/todos`): el board completo en un solo link público, con los clientes uno abajo del otro. Es para el equipo — no se lo pases a un cliente, porque muestra todo.
+- **Vista compartida** (`/p/<token>`): el link viejo por token, de sólo lectura y con el board entero. Queda para los tokens ya repartidos; los links por cliente lo reemplazan. Se rota/revoca desde "Compartir".
 - **Boards de clientas** — **Board - Mely** (`/boardmely`), **Board - Yiss** (`/boardyiss`), **Board - Mafe** (`/boardmafe`) y **Board - Nadine** (`/boardnadine`): copias independientes del board de Proyectos, una por clienta externa. Son **públicas y sin login** (se accede directo por el link), con edición completa. Usan "Grupos" en vez de "Clientes" y guardan sus datos en tablas aisladas (`mely_*` / `yiss_*` / `mafe_*` / `nadine_*`). No aparecen en el menú del equipo; sin sesión, la app manda a login (no ven `/projects` ni `/tasks`).
 
 Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calendar, ni Slack.
@@ -16,6 +18,8 @@ Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calen
 > Timeliner requiere aplicar `supabase/migrations/0024_timeliner.sql` (usa la tabla `holidays` ya existente).
 >
 > Briefs requiere aplicar `supabase/migrations/0027_briefs.sql` y configurar `ANTHROPIC_API_KEY`.
+>
+> Los links por cliente requieren `supabase/migrations/0028_client_public_links.sql` (agrega `clients.slug` y las funciones públicas de lectura).
 
 ### Proyectos: features clave
 
@@ -32,6 +36,7 @@ Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calen
 - Búsqueda full-text (`/`).
 - Export CSV.
 - Atajos: `N` nuevo proyecto · `/` buscar · `A` toggle archivo.
+- Links por cliente: cada cliente nuevo recibe su link automáticamente (la primera palabra del nombre: "Copa Airlines" → `/copa`). Editable desde "Compartir". Como viven en la raíz del dominio, no pueden llamarse igual que una ruta de la app (`tasks`, `projects`, `briefs`, `timeliner`, `todos`, `login`, `p`, …); la app rechaza esos nombres y avisa.
 
 Los boards de clientas (Mely, Yiss, Mafe) comparten estas features (con "Grupos" en lugar de "Clientes"); no incluyen el botón "Compartir" porque el board ya es el link público.
 
