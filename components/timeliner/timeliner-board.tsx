@@ -8,6 +8,7 @@ import {
   Download,
   Flag,
   Layers,
+  Link2,
   ListTodo,
   Pencil,
   Plus,
@@ -24,6 +25,7 @@ import {
 } from "@/app/actions/timeliner";
 import { GanttChart } from "@/components/timeliner/gantt-chart";
 import { ItemEditor } from "@/components/timeliner/item-editor";
+import { ShareTimelineButton } from "@/components/timeliner/share-timeline-button";
 import {
   TIMELINER_KEY,
   useTimeliner,
@@ -164,7 +166,8 @@ export function TimelinerBoard() {
             Armá el cronograma del proyecto: tareas con duración, hitos y
             owners. Arrastrá las barras para mover o estirar, y usá la
             manija ⋮⋮ de la izquierda para reordenar las filas. Visible y
-            editable por el equipo.
+            editable por el equipo, y compartible con el cliente en sólo
+            lectura desde “Compartir”.
           </p>
         </div>
         {selected ? (
@@ -199,6 +202,7 @@ export function TimelinerBoard() {
               <Download />
               Excel
             </Button>
+            <ShareTimelineButton timeline={selected} />
           </div>
         ) : null}
       </header>
@@ -220,7 +224,13 @@ export function TimelinerBoard() {
                 : "bg-background hover:bg-accent",
             )}
           >
-            {t.name}
+            <span className="truncate">{t.name}</span>
+            {t.share_token ? (
+              <Link2
+                className="ml-1.5 size-3 shrink-0 opacity-70"
+                aria-label="Compartido con el cliente"
+              />
+            ) : null}
           </button>
         ))}
         <NewTimelinePopover onCreated={(id) => setSelectedId(id)} />

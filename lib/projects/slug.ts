@@ -11,6 +11,8 @@ export const RESERVED_SLUGS: readonly string[] = [
   "briefs",
   "timeliner",
   "todos",
+  "t",
+  "timeline",
   "login",
   "logout",
   "auth",

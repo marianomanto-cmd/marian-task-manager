@@ -12,7 +12,7 @@ import type {
 import { createClient } from "@/lib/supabase/server";
 
 const TIMELINE_COLUMNS =
-  "id, name, position, weekends_enabled, holiday_countries";
+  "id, name, position, weekends_enabled, holiday_countries, share_token";
 const GROUP_COLUMNS = "id, timeline_id, name, position";
 const ITEM_COLUMNS =
   "id, timeline_id, group_id, title, owner_key, start_date, end_date, kind, position";
@@ -274,6 +274,58 @@ export async function deleteTimelineAction(
       .eq("id", parsed.data);
     if (error) throw new Error(error.message);
     return { ok: true, data: { id: parsed.data } };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+/**
+ * Create or rotate the timeline's public link (`/t/<token>`). Rotating writes a
+ * fresh token, which kills the previous link — that's how a link handed to the
+ * wrong person is taken back.
+ */
+export async function rotateTimelineShareTokenAction(
+  id: string,
+): Promise<ActionResult<Timeline>> {
+  const parsed = z.string().uuid().safeParse(id);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+  const auth = await requireUser();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("timelines")
+      .update({ share_token: crypto.randomUUID() })
+      .eq("id", parsed.data)
+      .select(TIMELINE_COLUMNS)
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, data: data as Timeline };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+/** Stop sharing: the link 404s from here on. */
+export async function revokeTimelineShareTokenAction(
+  id: string,
+): Promise<ActionResult<Timeline>> {
+  const parsed = z.string().uuid().safeParse(id);
+  if (!parsed.success) return asInvalid(parsed.error.message);
+  const auth = await requireUser();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("timelines")
+      .update({ share_token: null })
+      .eq("id", parsed.data)
+      .select(TIMELINE_COLUMNS)
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, data: data as Timeline };
   } catch (err) {
     return asUnknown(err);
   }

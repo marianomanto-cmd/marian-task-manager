@@ -7,6 +7,21 @@ export type Timeline = {
   weekends_enabled: boolean;
   /** Subset of HOLIDAY_COUNTRY codes to highlight on the grid. */
   holiday_countries: string[];
+  /**
+   * Public read-only link (`/t/<share_token>`). Null while the timeline isn't
+   * shared. Only reaches signed-in members — the public view never sees it.
+   */
+  share_token: string | null;
+};
+
+/** A timeline as seen through a share link: no token, no internal columns. */
+export type PublicTimeline = {
+  id: string;
+  name: string;
+  weekends_enabled: boolean;
+  holiday_countries: string[];
+  /** Last edit to the timeline row itself, ISO. */
+  updated_at: string;
 };
 
 export type TimelineGroup = {
@@ -28,6 +43,16 @@ export type TimelineItem = {
   end_date: string;
   kind: TimelineItemKind;
   position: number;
+};
+
+/** Everything a public share link renders, in one snapshot. */
+export type PublicTimelineData = {
+  timeline: PublicTimeline;
+  groups: TimelineGroup[];
+  items: TimelineItem[];
+  holidays: Holiday[];
+  /** When the server read this snapshot, ISO — drives the "updated" stamp. */
+  fetched_at: string;
 };
 
 export type TimelineOwner = "sangria" | "client" | "third_party";
