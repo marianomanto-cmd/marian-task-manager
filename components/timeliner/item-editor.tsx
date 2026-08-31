@@ -3,7 +3,7 @@
 import * as React from "react";
 import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Flag, ListTodo, Trash2 } from "lucide-react";
+import { Flag, ListTodo, Star, Trash2 } from "lucide-react";
 
 import {
   createTimelineItemAction,
@@ -15,6 +15,7 @@ import { TIMELINER_KEY } from "@/components/timeliner/use-timeliner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
+import { Switch } from "@/components/ui/switch";
 import { showToast } from "@/components/ui/toast";
 import type {
   TimelineGroup,
@@ -57,6 +58,7 @@ export function ItemEditor({
   const [kind, setKind] = React.useState<TimelineItemKind>(
     item?.kind ?? defaultKind,
   );
+  const [isKey, setIsKey] = React.useState(item?.is_key ?? false);
   const [start, setStart] = React.useState(item?.start_date ?? defaultStart);
   const [duration, setDuration] = React.useState<number>(
     item
@@ -80,6 +82,7 @@ export function ItemEditor({
           start_date: start,
           end_date: end,
           kind,
+          is_key: isKey,
         });
         if (!res.ok) throw new Error(res.message);
         return res.data;
@@ -92,6 +95,7 @@ export function ItemEditor({
         start_date: start,
         end_date: end,
         kind,
+        is_key: isKey,
       });
       if (!res.ok) throw new Error(res.message);
       return res.data;
@@ -211,6 +215,19 @@ export function ItemEditor({
             </div>
           ) : null}
         </div>
+
+        {kind === "task" ? (
+          <label className="flex cursor-pointer items-center justify-between gap-2 pt-1 text-sm">
+            <span className="flex items-center gap-1.5">
+              <Star className="size-3.5 text-amber-500" />
+              Destacar en el MASTER
+              <span className="text-muted-foreground block text-[11px]">
+                (los hitos ya aparecen solos)
+              </span>
+            </span>
+            <Switch checked={isKey} onCheckedChange={setIsKey} />
+          </label>
+        ) : null}
 
         <div className="flex items-center justify-between gap-2 pt-1">
           {editing ? (

@@ -4,6 +4,7 @@ import * as React from "react";
 import { differenceInCalendarDays, format, isSameDay, isWeekend, parseISO, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
 
+import { DependencyArrows } from "@/components/timeliner/dependency-arrows";
 import { OwnerDot } from "@/components/timeliner/owner-picker";
 import {
   DAY_W,
@@ -19,6 +20,7 @@ import {
   buildDayRange,
   buildHolidayMap,
   buildMonthSegments,
+  buildRowLayout,
   buildRows,
   firstHolidayColor,
   ownerColors,
@@ -27,6 +29,7 @@ import {
 import {
   ownerInfo,
   type Holiday,
+  type TimelineDependency,
   type TimelineGroup,
   type TimelineItem,
 } from "@/lib/timeliner/types";
@@ -41,11 +44,13 @@ export function PublicGantt({
   timeline,
   groups,
   items,
+  dependencies,
   holidays,
 }: {
   timeline: { weekends_enabled: boolean; holiday_countries: string[] };
   groups: TimelineGroup[];
   items: TimelineItem[];
+  dependencies: TimelineDependency[];
   holidays: Holiday[];
 }) {
   const today = startOfDay(new Date());
@@ -72,14 +77,16 @@ export function PublicGantt({
     [items, groups],
   );
 
+  const rowLayout = React.useMemo(() => buildRowLayout(rows), [rows]);
+
   return (
     <div className="bg-card overflow-auto rounded-xl border" style={{ maxHeight: "72vh" }}>
       <div style={{ width: LEFT_W + gridWidth, minWidth: "100%" }}>
         {/* Header */}
-        <div className="bg-card sticky top-0 z-20">
+        <div className="bg-card sticky top-0 z-30">
           <div className="flex border-b">
             <div
-              className="bg-card text-muted-foreground sticky left-0 z-30 shrink-0 border-r px-3 py-1.5 text-xs font-semibold"
+              className="bg-card text-muted-foreground sticky left-0 z-40 shrink-0 border-r px-3 py-1.5 text-xs font-semibold"
               style={{ width: LEFT_W }}
             >
               Tareas e hitos
@@ -98,7 +105,7 @@ export function PublicGantt({
           </div>
           <div className="flex border-b">
             <div
-              className="bg-card sticky left-0 z-30 shrink-0 border-r"
+              className="bg-card sticky left-0 z-40 shrink-0 border-r"
               style={{ width: LEFT_W }}
             />
             <div className="flex" style={{ width: gridWidth }}>
@@ -145,7 +152,16 @@ export function PublicGantt({
             Todavía no hay tareas ni hitos cargados en este timeline.
           </div>
         ) : (
-          rows.map((row) => {
+          <div className="relative">
+          <DependencyArrows
+            items={items}
+            dependencies={dependencies}
+            topById={rowLayout.topById}
+            rangeStart={rangeStart}
+            gridWidth={gridWidth}
+            height={rowLayout.height}
+          />
+          {rows.map((row) => {
             if (row.type === "group") {
               return (
                 <div
@@ -154,7 +170,7 @@ export function PublicGantt({
                   style={{ height: GROUP_H }}
                 >
                   <div
-                    className="bg-muted sticky left-0 z-10 flex shrink-0 items-center gap-2 border-r px-3"
+                    className="bg-muted sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r px-3"
                     style={{ width: LEFT_W }}
                   >
                     <span
@@ -197,7 +213,7 @@ export function PublicGantt({
                 style={{ height: ROW_H }}
               >
                 <div
-                  className="bg-card sticky left-0 z-10 flex shrink-0 items-center gap-2 border-r px-3"
+                  className="bg-card sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r px-3"
                   style={{ width: LEFT_W }}
                 >
                   {isMilestone ? (
@@ -288,7 +304,8 @@ export function PublicGantt({
                 </div>
               </div>
             );
-          })
+          })}
+          </div>
         )}
       </div>
     </div>

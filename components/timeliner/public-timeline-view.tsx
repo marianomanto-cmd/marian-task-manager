@@ -73,7 +73,8 @@ export function PublicTimelineView({
     );
   }
 
-  const { timeline, groups, items, holidays, fetched_at } = state.data;
+  const { timeline, groups, items, dependencies, holidays, fetched_at } =
+    state.data;
   const activeCountries = HOLIDAY_COUNTRIES.filter((c) =>
     timeline.holiday_countries.includes(c.code),
   );
@@ -104,6 +105,7 @@ export function PublicTimelineView({
           timeline={timeline}
           groups={groups}
           items={items}
+          dependencies={dependencies}
           holidays={holidays}
         />
 
