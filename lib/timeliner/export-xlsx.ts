@@ -8,7 +8,12 @@ import {
 } from "date-fns";
 
 import { getMemberByKey } from "@/lib/team/members";
-import type { Holiday, Timeline, TimelineItem } from "@/lib/timeliner/types";
+import type {
+  Holiday,
+  Timeline,
+  TimelineDependency,
+  TimelineItem,
+} from "@/lib/timeliner/types";
 
 /** Hex (no #) per member colorIndex, aligned with the in-app palette order. */
 const OWNER_HEX = [
@@ -39,10 +44,12 @@ function durationDays(item: TimelineItem): number {
 export async function exportTimelineXlsx({
   timeline,
   items,
+  dependencies = [],
   holidays,
 }: {
   timeline: Timeline;
   items: TimelineItem[];
+  dependencies?: TimelineDependency[];
   holidays: Holiday[];
 }): Promise<void> {
   const ExcelJS = (await import("exceljs")).default;
@@ -59,6 +66,7 @@ export async function exportTimelineXlsx({
     { header: "Fin", key: "end", width: 13 },
     { header: "Duración (días)", key: "days", width: 16 },
     { header: "Tipo", key: "kind", width: 12 },
+    { header: "Depende de", key: "deps", width: 46 },
   ];
   table.getRow(1).font = { bold: true };
   table.getRow(1).fill = {
@@ -68,6 +76,22 @@ export async function exportTimelineXlsx({
   };
   table.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
 
+  // Predecessors per item, so the chain drawn on screen survives the export.
+  const titleById = new Map(items.map((i) => [i.id, i.title]));
+  const predecessorsById = new Map<string, string[]>();
+  for (const d of dependencies) {
+    const from = titleById.get(d.from_item_id);
+    if (!from || !titleById.has(d.to_item_id)) continue;
+    const lag =
+      d.lag_days === 0
+        ? ""
+        : ` ${d.lag_days > 0 ? "+" : ""}${d.lag_days}d`;
+    const list = predecessorsById.get(d.to_item_id);
+    const label = `${from} (${d.dep_type}${lag})`;
+    if (list) list.push(label);
+    else predecessorsById.set(d.to_item_id, [label]);
+  }
+
   for (const it of items) {
     const row = table.addRow({
       title: it.title,
@@ -76,6 +100,7 @@ export async function exportTimelineXlsx({
       end: it.kind === "milestone" ? "" : it.end_date,
       days: it.kind === "milestone" ? "" : durationDays(it),
       kind: it.kind === "milestone" ? "Hito" : "Tarea",
+      deps: (predecessorsById.get(it.id) ?? []).join(", "),
     });
     const swatch = row.getCell("owner");
     swatch.fill = {

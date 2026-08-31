@@ -12,14 +12,21 @@ import {
 } from "date-fns";
 import { es } from "date-fns/locale";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { GripVertical, Trash2 } from "lucide-react";
+import { GripVertical, Star, Trash2 } from "lucide-react";
 
 import {
+  createTimelineDependencyAction,
   deleteTimelineGroupAction,
   renameTimelineGroupAction,
   reorderTimelineItemsAction,
+  rescheduleTimelineItemsAction,
   updateTimelineItemAction,
 } from "@/app/actions/timeliner";
+import {
+  DependencyArrows,
+  type DraftLink,
+} from "@/components/timeliner/dependency-arrows";
+import { DependencyEditor } from "@/components/timeliner/dependency-editor";
 import { OwnerDot } from "@/components/timeliner/owner-picker";
 import {
   TIMELINER_KEY,
@@ -41,37 +48,80 @@ import {
   buildDayRange,
   buildHolidayMap,
   buildMonthSegments,
+  buildRowLayout,
   buildRows,
   firstHolidayColor,
   ownerColors,
   sortTimelineItems,
 } from "@/lib/timeliner/grid";
+import { cascadeSchedule, type DateChange } from "@/lib/timeliner/schedule";
 import {
+  dependencyTypeFor,
   ownerInfo,
+  type DependencyEndpoint,
   type Holiday,
   type Timeline,
+  type TimelineDependency,
   type TimelineGroup,
   type TimelineItem,
 } from "@/lib/timeliner/types";
 import { cn } from "@/lib/utils";
 
-type Preview = { id: string; start: string; end: string } | null;
+/**
+ * Dates being dragged, by item id: the bar under the cursor plus everything
+ * the dependency graph is pushing along with it. Null when nothing is moving.
+ */
+type Preview = Map<string, { start: string; end: string }> | null;
+
+/** A bar the pointer can drop a link on — see `startLink`. */
+function barUnderPointer(
+  clientX: number,
+  clientY: number,
+): { id: string; side: DependencyEndpoint } | null {
+  const el = document
+    .elementFromPoint(clientX, clientY)
+    ?.closest<HTMLElement>("[data-bar-item]");
+  if (!el) return null;
+  const id = el.dataset.barItem;
+  if (!id) return null;
+  const rect = el.getBoundingClientRect();
+  // Frappe's rule, and the one that reads right: the half you drop on picks
+  // the endpoint — left half is the task's start, right half its finish.
+  return { id, side: clientX < rect.left + rect.width / 2 ? "start" : "end" };
+}
 
 export function GanttChart({
   timeline,
   groups,
   items,
+  dependencies,
   holidays,
   onEditItem,
 }: {
   timeline: Timeline;
   groups: TimelineGroup[];
   items: TimelineItem[];
+  dependencies: TimelineDependency[];
   holidays: Holiday[];
   onEditItem: (item: TimelineItem) => void;
 }) {
   const qc = useQueryClient();
   const [preview, setPreview] = React.useState<Preview>(null);
+  // Link being dragged out of a bar tip, and the arrow whose editor is open.
+  const [draftLink, setDraftLink] = React.useState<DraftLink | null>(null);
+  const [editingDep, setEditingDep] = React.useState<TimelineDependency | null>(
+    null,
+  );
+  const bodyRef = React.useRef<HTMLDivElement | null>(null);
+  // Read inside pointer handlers, which run long after the render that set
+  // them up — a ref keeps the cascade working off current data without
+  // re-binding a listener on every keystroke elsewhere on the board.
+  const itemsRef = React.useRef(items);
+  const depsRef = React.useRef(dependencies);
+  React.useEffect(() => {
+    itemsRef.current = items;
+    depsRef.current = dependencies;
+  }, [items, dependencies]);
   // Vertical drag-to-reorder: which row is being dragged and where it would
   // land (insertion index in the flat item list). Null when not dragging.
   const [reorder, setReorder] = React.useState<{
@@ -80,9 +130,79 @@ export function GanttChart({
   } | null>(null);
   const rowElRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
 
-  const updateMutation = useMutation({
-    mutationFn: async (vars: { id: string; start_date: string; end_date: string }) => {
+  /** Patch item rows in the cache without waiting for a refetch. */
+  const applyLocalDates = React.useCallback(
+    (changes: readonly DateChange[]) => {
+      const patch = new Map(changes.map((c) => [c.id, c]));
+      qc.setQueryData<TimelinerQueryResult>(TIMELINER_KEY, (old) => {
+        if (!old || old.error !== null) return old;
+        return {
+          ...old,
+          data: {
+            ...old.data,
+            items: old.data.items.map((it) => {
+              const c = patch.get(it.id);
+              return c
+                ? { ...it, start_date: c.start_date, end_date: c.end_date }
+                : it;
+            }),
+          },
+        };
+      });
+    },
+    [qc],
+  );
+
+  /**
+   * Commit a drag: the bar that moved plus every item its dependencies pushed.
+   * One write for the batch, applied optimistically first so the bars don't
+   * snap back to their old dates while the round trip lands.
+   */
+  const rescheduleMutation = useMutation({
+    mutationFn: async (vars: { items: DateChange[] }) => {
+      const res = await rescheduleTimelineItemsAction({
+        timeline_id: timeline.id,
+        items: vars.items,
+      });
+      if (!res.ok) throw new Error(res.message);
+      return res.data;
+    },
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: TIMELINER_KEY });
+      const prev = qc.getQueryData<TimelinerQueryResult>(TIMELINER_KEY);
+      applyLocalDates(vars.items);
+      // Only now is the cache holding the dates the drag preview was showing,
+      // so dropping the preview here hands over without a frame of snap-back.
+      setPreview(null);
+      return { prev };
+    },
+    onError: (err: Error, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(TIMELINER_KEY, ctx.prev);
+      showToast({ title: err.message });
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: TIMELINER_KEY }),
+  });
+
+  const starMutation = useMutation({
+    mutationFn: async (vars: { id: string; is_key: boolean }) => {
       const res = await updateTimelineItemAction(vars);
+      if (!res.ok) throw new Error(res.message);
+      return res.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: TIMELINER_KEY }),
+    onError: (err: Error) => showToast({ title: err.message }),
+  });
+
+  const linkMutation = useMutation({
+    mutationFn: async (vars: {
+      from_item_id: string;
+      to_item_id: string;
+      dep_type: string;
+    }) => {
+      const res = await createTimelineDependencyAction({
+        timeline_id: timeline.id,
+        ...vars,
+      });
       if (!res.ok) throw new Error(res.message);
       return res.data;
     },
@@ -151,6 +271,20 @@ export function GanttChart({
     () => buildRows(sortedItems, groups),
     [sortedItems, groups],
   );
+
+  const rowLayout = React.useMemo(() => buildRowLayout(rows), [rows]);
+
+  /**
+   * The items as they look right now, drag included. Arrows read these, so a
+   * chain follows the cursor instead of snapping into place on release.
+   */
+  const previewedItems = React.useMemo(() => {
+    if (!preview) return items;
+    return items.map((it) => {
+      const p = preview.get(it.id);
+      return p ? { ...it, start_date: p.start, end_date: p.end } : it;
+    });
+  }, [items, preview]);
 
   // Flat list of items in the exact top-to-bottom order they render, and a
   // lookup of each item's index within it — the basis for reorder math.
@@ -270,6 +404,20 @@ export function GanttChart({
     const origEnd = item.end_date;
     let moved = false;
     let last = { start: origStart, end: origEnd };
+    let lastBatch: DateChange[] = [];
+
+    /** The dragged bar plus whatever its dependencies drag along behind it. */
+    function withCascade(): DateChange[] {
+      const primary: DateChange = {
+        id: item.id,
+        start_date: last.start,
+        end_date: last.end,
+      };
+      return [
+        primary,
+        ...cascadeSchedule(itemsRef.current, depsRef.current, [primary]),
+      ];
+    }
 
     function onMove(ev: PointerEvent) {
       const delta = Math.round((ev.clientX - startX) / DAY_W);
@@ -287,24 +435,75 @@ export function GanttChart({
         if (en < s) en = s;
       }
       last = { start: format(s, "yyyy-MM-dd"), end: format(en, "yyyy-MM-dd") };
-      setPreview({ id: item.id, ...last });
+      lastBatch = withCascade();
+      setPreview(new Map(lastBatch.map((c) => [c.id, { start: c.start_date, end: c.end_date }])));
     }
 
     function onUp() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      setPreview(null);
+      // A press that never moved is a click: open the editor.
       if (!moved) {
+        setPreview(null);
         onEditItem(item);
         return;
       }
       if (last.start !== origStart || last.end !== origEnd) {
-        updateMutation.mutate({
-          id: item.id,
-          start_date: last.start,
-          end_date: last.end,
-        });
+        // The preview is cleared by the mutation, once the new dates are in.
+        rescheduleMutation.mutate({ items: lastBatch });
+      } else {
+        setPreview(null);
       }
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  /**
+   * Drag a link out of a bar tip. The line follows the cursor and lands on
+   * whatever bar is under it; which half of that bar takes the drop decides
+   * whether the link ties to its start or its finish, and that pair of
+   * endpoints is the dependency type (finish→start, start→start, …).
+   */
+  function startLink(
+    e: React.PointerEvent,
+    item: TimelineItem,
+    side: DependencyEndpoint,
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    let landed: { id: string; side: DependencyEndpoint } | null = null;
+
+    function toGrid(ev: PointerEvent): { x: number; y: number } {
+      const rect = bodyRef.current?.getBoundingClientRect();
+      if (!rect) return { x: 0, y: 0 };
+      return { x: ev.clientX - rect.left - LEFT_W, y: ev.clientY - rect.top };
+    }
+
+    function onMove(ev: PointerEvent) {
+      const hit = barUnderPointer(ev.clientX, ev.clientY);
+      landed = hit && hit.id !== item.id ? hit : null;
+      const { x, y } = toGrid(ev);
+      setDraftLink({
+        fromId: item.id,
+        fromSide: side,
+        x,
+        y,
+        targetId: landed?.id ?? null,
+      });
+    }
+
+    function onUp() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setDraftLink(null);
+      if (!landed) return;
+      linkMutation.mutate({
+        from_item_id: item.id,
+        to_item_id: landed.id,
+        dep_type: dependencyTypeFor(side, landed.side),
+      });
     }
 
     window.addEventListener("pointermove", onMove);
@@ -315,10 +514,10 @@ export function GanttChart({
     <div className="bg-card overflow-auto rounded-xl border" style={{ maxHeight: "72vh" }}>
       <div style={{ width: LEFT_W + gridWidth, minWidth: "100%" }}>
         {/* Header */}
-        <div className="bg-card sticky top-0 z-20">
+        <div className="bg-card sticky top-0 z-30">
           <div className="flex border-b">
             <div
-              className="bg-card text-muted-foreground sticky left-0 z-30 shrink-0 border-r px-3 py-1.5 text-xs font-semibold"
+              className="bg-card text-muted-foreground sticky left-0 z-40 shrink-0 border-r px-3 py-1.5 text-xs font-semibold"
               style={{ width: LEFT_W }}
             >
               Tareas e hitos
@@ -337,7 +536,7 @@ export function GanttChart({
           </div>
           <div className="flex border-b">
             <div
-              className="bg-card sticky left-0 z-30 shrink-0 border-r"
+              className="bg-card sticky left-0 z-40 shrink-0 border-r"
               style={{ width: LEFT_W }}
             />
             <div className="flex" style={{ width: gridWidth }}>
@@ -384,7 +583,19 @@ export function GanttChart({
             Sin elementos todavía. Agregá una tarea o un hito para arrancar.
           </div>
         ) : (
-          rows.map((row) => {
+          <div className="relative" ref={bodyRef}>
+          <DependencyArrows
+            items={previewedItems}
+            dependencies={dependencies}
+            topById={rowLayout.topById}
+            rangeStart={rangeStart}
+            gridWidth={gridWidth}
+            height={rowLayout.height}
+            selectedId={editingDep?.id ?? null}
+            onSelect={setEditingDep}
+            draft={draftLink}
+          />
+          {rows.map((row) => {
             if (row.type === "group") {
               return (
                 <GroupHeaderRow
@@ -396,9 +607,9 @@ export function GanttChart({
               );
             }
             const item = row.item;
-            const isPrev = preview?.id === item.id;
-            const s = isPrev ? preview!.start : item.start_date;
-            const en = isPrev ? preview!.end : item.end_date;
+            const prev = preview?.get(item.id);
+            const s = prev ? prev.start : item.start_date;
+            const en = prev ? prev.end : item.end_date;
             const startIdx = differenceInCalendarDays(parseISO(s), rangeStart);
             const span = differenceInCalendarDays(parseISO(en), parseISO(s)) + 1;
             const left = startIdx * DAY_W;
@@ -408,6 +619,7 @@ export function GanttChart({
             const isMilestone = item.kind === "milestone";
             const myIndex = itemIndexById.get(item.id) ?? 0;
             const isDragging = reorder?.id === item.id;
+            const isLinkTarget = draftLink?.targetId === item.id;
             const showDropAbove =
               reorder !== null &&
               !reorderIsNoop &&
@@ -441,7 +653,7 @@ export function GanttChart({
                   <div className="bg-primary pointer-events-none absolute inset-x-0 bottom-0 z-30 h-0.5 translate-y-px" />
                 ) : null}
                 <div
-                  className="bg-card sticky left-0 z-10 flex shrink-0 items-stretch border-r"
+                  className="bg-card sticky left-0 z-20 flex shrink-0 items-stretch border-r"
                   style={{ width: LEFT_W }}
                 >
                   <span
@@ -479,6 +691,31 @@ export function GanttChart({
                       </span>
                     </span>
                   </button>
+                  {isMilestone ? null : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        starMutation.mutate({ id: item.id, is_key: !item.is_key })
+                      }
+                      title={
+                        item.is_key
+                          ? "Quitar del MASTER"
+                          : "Destacar en el MASTER"
+                      }
+                      aria-pressed={item.is_key}
+                      className={cn(
+                        "mr-2 inline-flex size-6 shrink-0 items-center justify-center self-center rounded transition",
+                        item.is_key
+                          ? "text-amber-500"
+                          : "text-muted-foreground/30 hover:text-amber-500 opacity-0 group-hover:opacity-100",
+                      )}
+                    >
+                      <Star
+                        className="size-3.5"
+                        fill={item.is_key ? "currentColor" : "none"}
+                      />
+                    </button>
+                  )}
                 </div>
 
                 <div className="relative" style={{ width: gridWidth }}>
@@ -506,27 +743,35 @@ export function GanttChart({
 
                   {isMilestone ? (
                     <div
-                      className="absolute top-1/2 z-10 -translate-y-1/2"
+                      data-bar-item={item.id}
+                      className={cn(
+                        "absolute top-1/2 z-10 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-[2px]",
+                        isLinkTarget && "ring-primary rounded-full ring-2 ring-offset-1",
+                      )}
                       style={{ left: left + DAY_W / 2 }}
                     >
                       <div
                         onPointerDown={(e) => startDrag(e, item, "move")}
                         className={cn(
-                          "size-3.5 -translate-x-1/2 rotate-45 cursor-grab rounded-[2px] border border-white/70 shadow-sm active:cursor-grabbing dark:border-black/30",
+                          "size-full rotate-45 cursor-grab rounded-[2px] border border-white/70 shadow-sm active:cursor-grabbing dark:border-black/30",
                           colors.barBg,
                         )}
                         title={item.title}
                       />
-                      <span className="text-foreground/80 pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 whitespace-nowrap text-[11px] font-medium">
+                      <LinkHandle side="start" onPointerDown={(e) => startLink(e, item, "start")} />
+                      <LinkHandle side="end" onPointerDown={(e) => startLink(e, item, "end")} />
+                      <span className="text-foreground/80 pointer-events-none absolute top-1/2 left-5 -translate-y-1/2 whitespace-nowrap text-[11px] font-medium">
                         {item.title}
                       </span>
                     </div>
                   ) : (
                     <div
+                      data-bar-item={item.id}
                       onPointerDown={(e) => startDrag(e, item, "move")}
                       className={cn(
                         "absolute top-1/2 z-10 flex -translate-y-1/2 cursor-grab items-center rounded-md shadow-sm active:cursor-grabbing",
                         colors.barBg,
+                        isLinkTarget && "ring-primary ring-2 ring-offset-1",
                       )}
                       style={{
                         left: left + 2,
@@ -546,15 +791,58 @@ export function GanttChart({
                         onPointerDown={(e) => startDrag(e, item, "r")}
                         className="absolute inset-y-0 right-0 w-2 cursor-ew-resize rounded-r-md"
                       />
+                      <LinkHandle side="start" onPointerDown={(e) => startLink(e, item, "start")} />
+                      <LinkHandle side="end" onPointerDown={(e) => startLink(e, item, "end")} />
                     </div>
                   )}
                 </div>
               </div>
             );
-          })
+          })}
+          </div>
         )}
       </div>
+
+      <DependencyEditor
+        key={editingDep?.id ?? "none"}
+        dependency={editingDep}
+        from={items.find((i) => i.id === editingDep?.from_item_id)}
+        to={items.find((i) => i.id === editingDep?.to_item_id)}
+        onClose={() => setEditingDep(null)}
+      />
     </div>
+  );
+}
+
+/**
+ * The little circle at a bar tip you pull a dependency out of. Hidden until
+ * the row is hovered so the chart stays clean, and always live during a link
+ * drag so it can also act as a drop target.
+ */
+function LinkHandle({
+  side,
+  onPointerDown,
+}: {
+  side: DependencyEndpoint;
+  onPointerDown: (e: React.PointerEvent) => void;
+}) {
+  return (
+    <span
+      role="button"
+      tabIndex={-1}
+      aria-label={
+        side === "start"
+          ? "Crear dependencia desde el inicio"
+          : "Crear dependencia desde el fin"
+      }
+      title="Arrastrá hasta otra tarea para vincularlas"
+      onPointerDown={onPointerDown}
+      className={cn(
+        "border-primary bg-background absolute top-1/2 z-20 size-2.5 -translate-y-1/2 cursor-crosshair rounded-full border-2 opacity-0 shadow-sm transition-opacity",
+        "group-hover:opacity-100 hover:scale-125",
+        side === "start" ? "-left-1.5" : "-right-1.5",
+      )}
+    />
   );
 }
 
@@ -608,7 +896,7 @@ function GroupHeaderRow({
   return (
     <div className="flex border-b" style={{ height: GROUP_H }}>
       <div
-        className="bg-muted sticky left-0 z-10 flex shrink-0 items-center gap-2 border-r px-3"
+        className="bg-muted sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r px-3"
         style={{ width: LEFT_W }}
       >
         {group && editing ? (
