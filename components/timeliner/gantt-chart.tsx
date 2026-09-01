@@ -457,28 +457,27 @@ export function GanttChart({
                   >
                     <GripVertical className="size-3.5" />
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => onEditItem(item)}
-                    className="hover:bg-muted/50 flex min-w-0 flex-1 items-center gap-2 pr-3 pl-0.5 text-left transition-colors"
-                  >
+                  <div className="flex min-w-0 flex-1 items-center gap-2 pr-3 pl-0.5">
                     {isMilestone ? (
-                      <span className={cn("size-3 rotate-45 rounded-[2px]", colors.barBg)} />
+                      <span className={cn("size-3 shrink-0 rotate-45 rounded-[2px]", colors.barBg)} />
                     ) : (
                       <OwnerDot ownerKey={item.owner_key} />
                     )}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">
-                        {item.title}
-                      </span>
-                      <span className="text-muted-foreground block truncate text-[11px]">
+                    <div className="min-w-0 flex-1">
+                      <ItemTitleCell item={item} />
+                      <button
+                        type="button"
+                        onClick={() => onEditItem(item)}
+                        title="Abrir el editor (owner, fechas, grupo)"
+                        className="text-muted-foreground hover:text-foreground block w-full truncate text-left text-[11px] transition-colors"
+                      >
                         {ownerLabel} ·{" "}
                         {isMilestone
                           ? format(parseISO(item.start_date), "d MMM", { locale: es })
                           : `${format(parseISO(item.start_date), "d MMM", { locale: es })} – ${format(parseISO(item.end_date), "d MMM", { locale: es })}`}
-                      </span>
-                    </span>
-                  </button>
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="relative" style={{ width: gridWidth }}>
@@ -555,6 +554,101 @@ export function GanttChart({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The item's title in the left column: click it to rename in place.
+ *
+ * Renaming is the edit people make most, so it happens right here instead of
+ * behind the editor dialog — same gesture as a group header. Everything else
+ * about the item (owner, dates, group, kind) still lives in the editor, one
+ * click away on the line below or on the bar itself.
+ */
+function ItemTitleCell({ item }: { item: TimelineItem }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(item.title);
+
+  const renameMutation = useMutation({
+    mutationFn: async (title: string) => {
+      const res = await updateTimelineItemAction({ id: item.id, title });
+      if (!res.ok) throw new Error(res.message);
+      return res.data;
+    },
+    // Show the new name immediately: the row, the bar and the export all read
+    // the same cached snapshot, so patching it keeps them in step.
+    onMutate: async (title) => {
+      await qc.cancelQueries({ queryKey: TIMELINER_KEY });
+      const prev = qc.getQueryData<TimelinerQueryResult>(TIMELINER_KEY);
+      qc.setQueryData<TimelinerQueryResult>(TIMELINER_KEY, (old) => {
+        if (!old || old.error !== null) return old;
+        return {
+          ...old,
+          data: {
+            ...old.data,
+            items: old.data.items.map((it) =>
+              it.id === item.id ? { ...it, title } : it,
+            ),
+          },
+        };
+      });
+      return { prev };
+    },
+    onError: (err: Error, _title, ctx) => {
+      if (ctx?.prev) qc.setQueryData(TIMELINER_KEY, ctx.prev);
+      showToast({ title: err.message });
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: TIMELINER_KEY }),
+  });
+
+  function commit() {
+    const trimmed = draft.trim();
+    setEditing(false);
+    if (!trimmed) {
+      // An empty title would leave an unreadable row: keep the old one.
+      setDraft(item.title);
+      return;
+    }
+    if (trimmed !== item.title) renameMutation.mutate(trimmed);
+    else setDraft(item.title);
+  }
+
+  if (editing) {
+    return (
+      <Input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onFocus={(e) => e.currentTarget.select()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            setDraft(item.title);
+            setEditing(false);
+          }
+        }}
+        className="h-6 text-sm font-medium"
+        aria-label={`Renombrar ${item.title}`}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        setDraft(item.title);
+        setEditing(true);
+      }}
+      title="Click para renombrar"
+      className="hover:bg-muted/60 -mx-1 block w-full truncate rounded px-1 text-left text-sm font-medium transition-colors"
+    >
+      {item.title}
+    </button>
   );
 }
 
