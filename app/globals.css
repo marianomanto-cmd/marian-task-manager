@@ -187,12 +187,20 @@
   opacity: 0.9;
 }
 
-/* Day tints. `highlightTime` returns these onto the chart's day columns. */
-.tl-gantt .tl-weekend { background-color: color-mix(in oklab, var(--color-slate-500) 15%, transparent); }
-.tl-gantt .tl-holiday-AR { background-color: color-mix(in oklab, var(--color-emerald-500) 14%, transparent); }
-.tl-gantt .tl-holiday-PA { background-color: color-mix(in oklab, var(--color-violet-500) 14%, transparent); }
-.tl-gantt .tl-holiday-US { background-color: color-mix(in oklab, var(--color-indigo-500) 14%, transparent); }
-.tl-gantt .tl-holiday-ES { background-color: color-mix(in oklab, var(--color-rose-500) 14%, transparent); }
+/* Day tints. `highlightTime` puts these on both the date ruler and the
+   full-height column behind the bars, so a weekend reads as one grey band
+   down the whole chart. The `!important` is aimed at SVAR's own `.wx-weekend`
+   rule, which otherwise leaves the column a barely-there blue. */
+.tl-gantt .tl-weekend {
+  background-color: color-mix(in oklab, var(--color-slate-500) 26%, transparent) !important;
+}
+.dark .tl-gantt .tl-weekend {
+  background-color: color-mix(in oklab, var(--color-slate-400) 18%, transparent) !important;
+}
+.tl-gantt .tl-holiday-AR { background-color: color-mix(in oklab, var(--color-emerald-500) 22%, transparent) !important; }
+.tl-gantt .tl-holiday-PA { background-color: color-mix(in oklab, var(--color-violet-500) 22%, transparent) !important; }
+.tl-gantt .tl-holiday-US { background-color: color-mix(in oklab, var(--color-indigo-500) 22%, transparent) !important; }
+.tl-gantt .tl-holiday-ES { background-color: color-mix(in oklab, var(--color-rose-500) 22%, transparent) !important; }
 
 /* Today. */
 .tl-gantt .tl-today {

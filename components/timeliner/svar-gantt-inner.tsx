@@ -91,20 +91,6 @@ export default function SvarGanttInner({
   const { resolvedTheme } = useTheme();
   const Theme = resolvedTheme === "dark" ? WillowDark : Willow;
 
-  // SVAR's themes inject a stylesheet from cdn.svar.dev for their icon font.
-  // We draw the handful of glyphs the chart uses ourselves (see globals.css),
-  // so drop the tag rather than let every page load reach a third party.
-  React.useEffect(() => {
-    const drop = () =>
-      document
-        .querySelectorAll('link[href^="https://cdn.svar.dev"]')
-        .forEach((el) => el.remove());
-    drop();
-    const observer = new MutationObserver(drop);
-    observer.observe(document.head, { childList: true });
-    return () => observer.disconnect();
-  }, []);
-
   const itemsById = React.useMemo(
     () => new Map(items.map((i) => [i.id, i])),
     [items],
@@ -161,16 +147,25 @@ export default function SvarGanttInner({
     [holidays, countryKey],
   );
 
-  /** Weekend and holiday tints, the same palette the rest of the app uses. */
+  /**
+   * Weekend and holiday tints, in the same palette as the rest of the app.
+   *
+   * `wx-weekend` is load-bearing and not just a name: it is SVAR's own class
+   * for a highlighted column, and it carries the rule that stretches the
+   * column down the full height of the chart. Drop it and the band collapses
+   * to nothing — the ruler stays tinted while the grid behind the bars goes
+   * blank. So every tinted day keeps it for the geometry, and our own class
+   * rides alongside to set the colour.
+   */
   const highlightTime = React.useCallback(
     (date: Date, unit: string) => {
       if (unit !== "day") return "";
       const entry = holidayByDate.get(format(date, "yyyy-MM-dd"));
       if (entry) {
         const country = firstHolidayColor(entry.countries);
-        if (country) return `tl-holiday tl-holiday-${country.code}`;
+        if (country) return `wx-weekend tl-holiday-${country.code}`;
       }
-      if (timeline.weekends_enabled && isWeekend(date)) return "tl-weekend";
+      if (timeline.weekends_enabled && isWeekend(date)) return "wx-weekend tl-weekend";
       return "";
     },
     [holidayByDate, timeline.weekends_enabled],
