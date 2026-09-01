@@ -63,11 +63,11 @@ export function PublicMasterView({
     );
   }
 
-  const { timelines, milestones, fetched_at } = state.data;
+  const { timelines, items, groups, fetched_at } = state.data;
 
   return (
     <>
-      <MasterHeader subtitle="Hitos de todos los proyectos · sólo lectura" />
+      <MasterHeader subtitle="Todos los proyectos · sólo lectura" />
 
       <main className="mx-auto flex w-full max-w-[120rem] flex-col gap-4 px-4 py-4 md:px-6 md:py-6 lg:px-8">
         <div className="flex items-center justify-end gap-2">
@@ -84,7 +84,7 @@ export function PublicMasterView({
           </Button>
         </div>
 
-        <MasterView timelines={timelines} items={milestones} />
+        <MasterView timelines={timelines} items={items} groups={groups} />
 
         <p className="text-muted-foreground/70 text-[11px]">
           Vista de sólo lectura. Se actualiza sola: cualquier cambio que haga el

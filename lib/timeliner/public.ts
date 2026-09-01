@@ -90,8 +90,7 @@ export const loadPublicTimeline = cache(async function loadPublicTimeline(
  * MASTER spans every timeline, so this link shows every project's name and
  * dates — it is a team link, not a client one, and the share UI says so. The
  * SQL still only answers a token that matches the singleton in
- * `timeline_master_share`, and it returns hitos only: tasks never leave the
- * app through here.
+ * `timeline_master_share`.
  */
 export const loadPublicMaster = cache(async function loadPublicMaster(
   token: string,
@@ -101,12 +100,13 @@ export const loadPublicMaster = cache(async function loadPublicMaster(
   const supabase = anonClient();
   const p_token = token.toLowerCase();
 
-  const [timelinesRes, milestonesRes] = await Promise.all([
+  const [timelinesRes, itemsRes, groupsRes] = await Promise.all([
     supabase.rpc("get_public_master_timelines", { p_token }),
-    supabase.rpc("get_public_master_milestones", { p_token }),
+    supabase.rpc("get_public_master_items", { p_token }),
+    supabase.rpc("get_public_master_groups", { p_token }),
   ]);
 
-  if (timelinesRes.error || milestonesRes.error) return null;
+  if (timelinesRes.error || itemsRes.error) return null;
 
   const timelines = (timelinesRes.data ?? []) as MasterTimeline[];
   // No timelines at all = the token matches nothing (revoked, rotated, made
@@ -115,7 +115,9 @@ export const loadPublicMaster = cache(async function loadPublicMaster(
 
   return {
     timelines,
-    milestones: (milestonesRes.data ?? []) as TimelineItem[],
+    items: (itemsRes.data ?? []) as TimelineItem[],
+    // Groups only feed a filter: losing them costs the filter, not the page.
+    groups: groupsRes.error ? [] : ((groupsRes.data ?? []) as TimelineGroup[]),
     fetched_at: new Date().toISOString(),
   };
 });

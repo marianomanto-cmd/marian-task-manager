@@ -59,8 +59,10 @@ export type MasterTimeline = {
 /** Everything a public MASTER link renders, in one snapshot. */
 export type PublicMasterData = {
   timelines: MasterTimeline[];
-  /** Milestones only — MASTER never shows tasks. */
-  milestones: TimelineItem[];
+  /** Tasks and hitos alike: MASTER shows both, filtered in the browser. */
+  items: TimelineItem[];
+  /** Feeds the group filter. */
+  groups: TimelineGroup[];
   /** When the server read this snapshot, ISO. */
   fetched_at: string;
 };
