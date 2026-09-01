@@ -355,7 +355,6 @@ export function TimelinerBoard() {
         <MasterView
           timelines={timelines}
           items={allItems}
-          holidays={holidays}
           onOpenTimeline={(id) => setSelectedId(id)}
         />
       ) : !selected ? (
