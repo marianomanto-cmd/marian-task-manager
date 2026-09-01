@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CalendarRange, RefreshCw } from "lucide-react";
 
 import { getPublicTimelineAction } from "@/app/actions/timeliner-public";
-import { PublicGantt } from "@/components/timeliner/public-gantt";
+import { SvarGantt } from "@/components/timeliner/svar-gantt";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import {
@@ -101,12 +101,14 @@ export function PublicTimelineView({
           </div>
         </div>
 
-        <PublicGantt
+        <SvarGantt
+          key={timeline.id}
           timeline={timeline}
           groups={groups}
           items={items}
           dependencies={dependencies}
           holidays={holidays}
+          readonly
         />
 
         <p className="text-muted-foreground/70 text-[11px]">

@@ -18,15 +18,23 @@ import {
 
 import {
   createTimelineAction,
+  createTimelineDependencyAction,
   createTimelineGroupAction,
   createTimelineItemAction,
   deleteTimelineAction,
+  deleteTimelineDependencyAction,
+  deleteTimelineItemAction,
   renameTimelineAction,
+  rescheduleTimelineItemsAction,
+  updateTimelineDependencyAction,
   updateTimelineSettingsAction,
 } from "@/app/actions/timeliner";
-import { GanttChart } from "@/components/timeliner/gantt-chart";
 import { ItemEditor } from "@/components/timeliner/item-editor";
 import { MasterView } from "@/components/timeliner/master-view";
+import {
+  SvarGantt,
+  type SvarGanttHandlers,
+} from "@/components/timeliner/svar-gantt";
 import { ShareTimelineButton } from "@/components/timeliner/share-timeline-button";
 import {
   TIMELINER_KEY,
@@ -124,6 +132,66 @@ export function TimelinerBoard() {
     onSuccess: () => qc.invalidateQueries({ queryKey: TIMELINER_KEY }),
     onError: (err: Error) => showToast({ title: err.message }),
   });
+
+  /**
+   * Everything the chart reports, written straight through to Postgres.
+   *
+   * SVAR owns the on-screen state during a gesture — that is what makes the
+   * drag feel immediate and what moves the successors of a link for us — so
+   * these only persist the result. `mutate` without an optimistic patch is
+   * deliberate: the chart already shows the new position, and re-feeding it
+   * would fight the component for control of the same row.
+   */
+  const persist = React.useCallback(
+    async (run: () => Promise<{ ok: boolean; message?: string }>) => {
+      const res = await run();
+      if (!res.ok) {
+        showToast({ title: res.message ?? "No se pudo guardar" });
+        // The write failed, so the chart is now ahead of the database; pull the
+        // stored plan back in rather than leave the two disagreeing.
+        qc.invalidateQueries({ queryKey: TIMELINER_KEY });
+      }
+    },
+    [qc],
+  );
+
+  const ganttHandlers: SvarGanttHandlers = React.useMemo(
+    () => ({
+      onDates: (changes) => {
+        if (!selected || changes.length === 0) return;
+        // One write for the whole chain: the bar that moved and everything its
+        // dependencies pulled along with it.
+        void persist(() =>
+          rescheduleTimelineItemsAction({
+            timeline_id: selected.id,
+            items: changes,
+          }),
+        );
+      },
+      onAddLink: (link) => {
+        if (!selected) return;
+        void persist(() =>
+          createTimelineDependencyAction({ timeline_id: selected.id, ...link }),
+        );
+      },
+      onUpdateLink: (id, patch) => {
+        void persist(() => updateTimelineDependencyAction({ id, ...patch }));
+      },
+      onDeleteLink: (id) => {
+        void persist(() => deleteTimelineDependencyAction(id));
+      },
+      onDeleteItem: (id) => {
+        void persist(() => deleteTimelineItemAction(id));
+      },
+      onMoveItem: () => {
+        // Vertical order lives in SVAR's tree while the chart is mounted; the
+        // stored order is refreshed from the server on the next load.
+        qc.invalidateQueries({ queryKey: TIMELINER_KEY });
+      },
+      onEditItem: (item) => openEditor(item),
+    }),
+    [selected, persist, qc],
+  );
 
   // Item editor (create / edit), remounted per open so fields reset.
   const [editorOpen, setEditorOpen] = React.useState(false);
@@ -375,13 +443,14 @@ export function TimelinerBoard() {
         <EmptyTimelines onCreated={(id) => setSelectedId(id)} />
       ) : (
         <>
-          <GanttChart
+          <SvarGantt
+            key={selected.id}
             timeline={selected}
             groups={groups}
             items={items}
             dependencies={dependencies}
             holidays={holidays}
-            onEditItem={(item) => openEditor(item)}
+            handlers={ganttHandlers}
           />
           <button
             type="button"

@@ -57,8 +57,10 @@ export type TimelineItem = {
  * - `FS` finish → start: the successor starts after the predecessor ends.
  * - `SS` start → start, `FF` finish → finish, `SF` start → finish.
  *
- * Which one you get is decided by where you drag from and where you drop:
- * the left tip of a bar is its start, the right tip its finish.
+ * Which one you get is decided by where you drag from and where you drop: the
+ * left tip of a bar is its start, the right tip its finish. SVAR names the
+ * same four `s2s` / `s2e` / `e2s` / `e2e`; `lib/timeliner/svar-adapter.ts`
+ * translates between the two.
  */
 export type TimelineDependencyType = "FS" | "SS" | "FF" | "SF";
 
@@ -73,25 +75,6 @@ export type TimelineDependency = {
   /** Days of slack the link enforces on top of its type; negative = overlap. */
   lag_days: number;
 };
-
-/** Which tip of a bar a link touches. Milestones use "start" for both. */
-export type DependencyEndpoint = "start" | "end";
-
-export const DEPENDENCY_TYPE_LABELS: Record<TimelineDependencyType, string> = {
-  FS: "Fin → Inicio",
-  SS: "Inicio → Inicio",
-  FF: "Fin → Fin",
-  SF: "Inicio → Fin",
-};
-
-/** The link type a drag from `from` dropped on `to` produces. */
-export function dependencyTypeFor(
-  from: DependencyEndpoint,
-  to: DependencyEndpoint,
-): TimelineDependencyType {
-  if (from === "end") return to === "start" ? "FS" : "FF";
-  return to === "start" ? "SS" : "SF";
-}
 
 /** Everything a public share link renders, in one snapshot. */
 export type PublicTimelineData = {

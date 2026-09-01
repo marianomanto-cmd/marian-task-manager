@@ -134,3 +134,123 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Timeliner · SVAR Gantt (@svar-ui/react-gantt)
+ *
+ * Two jobs here. First, dress the chart in the app's own language: the same
+ * owner colours, weekend tint and per-country holiday tint the rest of
+ * Timeliner uses, so the Gantt doesn't look like a bolted-on widget.
+ *
+ * Second, stand in for SVAR's icon font. Its themes link a stylesheet from
+ * cdn.svar.dev at runtime; the chart only ever draws three glyphs, so we draw
+ * those ourselves and drop the tag (see svar-gantt-inner.tsx) rather than let
+ * every page load reach a third-party CDN.
+ * ------------------------------------------------------------------------ */
+
+.tl-gantt {
+  --tl-owner-sangria: var(--color-rose-800);
+  --tl-owner-client: var(--color-emerald-600);
+  --tl-owner-third_party: var(--color-amber-400);
+  --tl-owner-none: var(--color-slate-400);
+}
+
+/* Bars: the owner's colour, its label, and the MASTER star. */
+.tl-gantt .tl-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  height: 100%;
+  padding: 0 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 11px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--tl-owner-none);
+}
+.tl-gantt .tl-owner-sangria { background: var(--tl-owner-sangria); }
+.tl-gantt .tl-owner-client { background: var(--tl-owner-client); }
+.tl-gantt .tl-owner-third_party {
+  background: var(--tl-owner-third_party);
+  color: var(--color-amber-950);
+}
+.tl-gantt .tl-bar-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl-gantt .tl-bar-star {
+  flex: none;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+/* Day tints. `highlightTime` returns these onto the chart's day columns. */
+.tl-gantt .tl-weekend { background-color: color-mix(in oklab, var(--color-slate-500) 15%, transparent); }
+.tl-gantt .tl-holiday-AR { background-color: color-mix(in oklab, var(--color-emerald-500) 14%, transparent); }
+.tl-gantt .tl-holiday-PA { background-color: color-mix(in oklab, var(--color-violet-500) 14%, transparent); }
+.tl-gantt .tl-holiday-US { background-color: color-mix(in oklab, var(--color-indigo-500) 14%, transparent); }
+.tl-gantt .tl-holiday-ES { background-color: color-mix(in oklab, var(--color-rose-500) 14%, transparent); }
+
+/* Today. */
+.tl-gantt .tl-today {
+  background: var(--color-sky-500);
+  width: 2px;
+}
+
+/* SVAR icon glyphs, drawn locally instead of fetched from cdn.svar.dev. */
+.tl-gantt [class*="wxi-"]::before {
+  content: "";
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+.tl-gantt .wxi-plus::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M11 5h2v14h-2z'/%3E%3Cpath d='M5 11h14v2H5z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M11 5h2v14h-2z'/%3E%3Cpath d='M5 11h14v2H5z'/%3E%3C/svg%3E");
+}
+.tl-gantt .wxi-menu-left::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M15 6.4 13.6 5l-7 7 7 7L15 17.6 9.4 12z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M15 6.4 13.6 5l-7 7 7 7L15 17.6 9.4 12z'/%3E%3C/svg%3E");
+}
+.tl-gantt .wxi-menu-right::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 17.6 10.4 19l7-7-7-7L9 6.4 14.6 12z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 17.6 10.4 19l7-7-7-7L9 6.4 14.6 12z'/%3E%3C/svg%3E");
+}
+
+/* Milestones. SVAR renders the diamond as `.wx-content`, a rotated sibling of
+   the template's output, so the template itself must stay invisible and the
+   colour has to be applied to that sibling — `:has()` is what lets a rule
+   reach it from the owner class the template carries. */
+.tl-gantt .tl-milestone {
+  position: absolute;
+  inset: 0;
+  background: none;
+  pointer-events: none;
+}
+.tl-gantt .wx-milestone:has(.tl-owner-sangria) .wx-content { background: var(--tl-owner-sangria); }
+.tl-gantt .wx-milestone:has(.tl-owner-client) .wx-content { background: var(--tl-owner-client); }
+.tl-gantt .wx-milestone:has(.tl-owner-third_party) .wx-content { background: var(--tl-owner-third_party); }
+.tl-gantt .wx-milestone:has(.tl-owner-none) .wx-content { background: var(--tl-owner-none); }
+
+/* The label hangs to the right of the 31px diamond box. The template's own
+   element is not rotated, so no counter-rotation is needed here. */
+.tl-gantt .tl-milestone-label {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--foreground);
+}

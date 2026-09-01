@@ -26,8 +26,9 @@ Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calen
 ### Timeliner: features clave
 
 - **Timeline nuevo con el proyecto base**: el botón `+` crea el timeline ya cargado con las 22 tareas e hitos de un proyecto estándar (los mismos de "Colombia Positioning", en el mismo orden y con las mismas distancias entre sí) y con su cadena de dependencias armada. Sólo queda estirar, acortar y mover las barras con el mouse. En el mismo popover se elige la fecha de arranque (por defecto el lunes que viene, así ninguna tarea cambia de día de la semana) y se puede apagar la plantilla para empezar en blanco.
-- **Dependencias arrastrando, sin modal**: al pasar el mouse por una barra aparecen dos puntitos, uno en cada punta. Se tira de uno hasta otra tarea o hito y quedan vinculados; la mitad de la barra donde se suelta decide si engancha al inicio o al fin, y ese par de puntas define el tipo (`FS` fin→inicio, `SS` inicio→inicio, `FF` fin→fin, `SF` inicio→fin). Click en una flecha para cambiarle el tipo, ponerle margen en días o borrarla.
-- **Todo se reacomoda solo**: al mover o estirar una barra, todo lo que cuelga de ella se corre en el mismo gesto — se ve en vivo mientras se arrastra, y se guarda de una sola vez al soltar. Cada vínculo conserva el aire con el que fue dibujado: una cadena pegada sigue pegada, una con tres días de margen mantiene los tres. Mover una tarea hacia atrás también arrastra a las que dependen de ella, hasta donde el resto de sus predecesoras lo permita. Los círculos entre tareas se rechazan al crearlos, y un vínculo que quedó incumplido se dibuja en rojo punteado en vez de corregirse solo.
+- **Dependencias arrastrando, sin modal**: al pasar el mouse por una barra aparecen dos puntitos, uno en cada punta. Se tira de uno hasta otra tarea o hito y quedan vinculados; la punta de la que salís y la que tocás definen el tipo (`FS` fin→inicio, `SS` inicio→inicio, `FF` fin→fin, `SF` inicio→fin).
+- **Todo se reacomoda solo**: al mover o estirar una barra, todo lo que cuelga de ella se corre en el mismo gesto y se guarda de una sola vez. Cada vínculo conserva el aire con el que fue dibujado: una cadena pegada sigue pegada, una con tres días de margen mantiene los tres. Mover una tarea hacia atrás también arrastra a las que dependen de ella, hasta donde el resto de sus predecesoras lo permita. Los círculos entre tareas se rechazan al crearlos.
+- **Zoom** de la escala (día / semana / mes) para pasar de una semana a un trimestre sin salir del timeline.
 - **★ para el MASTER**: la estrella de cada fila (o el switch del editor) marca una tarea como importante y la manda a la pestaña MASTER. Los hitos ya van solos.
 - El link para el cliente (`/t/<token>`) muestra las mismas flechas, en sólo lectura.
 - El export a Excel suma una columna **"Depende de"** con las predecesoras de cada tarea, su tipo y su margen.
@@ -51,9 +52,23 @@ Login con Google (cuentas `@sangria.agency`). Sin integraciones con Gmail, Calen
 
 Los boards de clientas (Mely, Yiss, Mafe) comparten estas features (con "Grupos" en lugar de "Clientes"); no incluyen el botón "Compartir" porque el board ya es el link público.
 
+### Timeliner: cómo está armado
+
+El Gantt corre sobre **[SVAR React Gantt](https://svar.dev/react/gantt/)** (`@svar-ui/react-gantt`, MIT). Ojo con el paquete: el que recomiendan casi todos los blogs es `wx-react-gantt`, que es **GPLv3 y sólo React 18**; el bueno para esto es el scope `@svar-ui/*` v2, MIT y `react >= 18`.
+
+Cuatro cosas que conviene saber antes de tocarlo, porque cada una costó encontrarla:
+
+1. **Los eventos son `on` + PascalCase** (`onUpdateTask`, `onAddLink`, …), aunque los tipos publicados digan otra cosa. Como el componente declara un índice `on${string}`, un nombre mal escrito compila igual y **nunca se dispara**. Si un handler "no anda", es lo primero a mirar.
+2. **El `end` de SVAR es exclusivo** y el nuestro inclusivo. Toda la conversión vive en `lib/timeliner/svar-adapter.ts`, junto con la traducción `FS/SS/FF/SF` ↔ `e2s/s2s/e2e/s2e` y los grupos ↔ *summary tasks*.
+3. **El auto-scheduling de SVAR no sirve acá**: con `schedule: {auto:true}` hace cumplir un vínculo *rechazando* el arrastre — tirás la barra y vuelve sola. Queda apagado a propósito, y la cascada la calcula `lib/timeliner/schedule.ts` (preserva el margen de cada vínculo) y se le devuelve al chart con `api.exec`.
+4. **SVAR se re-inicializa cuando cambia la identidad de sus props de config.** Por eso el componente monta con los datos una vez y lee el resto por refs: si no, un refetch en segundo plano te resetea el plan mientras arrastrás.
+
+Además está montado **sólo en cliente** (`ssr: false`): SVAR usa `useSyncExternalStore` sin snapshot de SSR, así que server-renderizarlo rompe la hidratación. Y sus temas linkean un font de íconos desde `cdn.svar.dev`; el chart usa tres glifos nada más, así que se dibujan localmente en `globals.css` y el `<link>` se saca, para no pegarle a un CDN de terceros en cada carga.
+
 ## Stack
 
 - Next.js 16 (App Router) + React 19 + TypeScript
+- [`@svar-ui/react-gantt`](https://svar.dev/react/gantt/) (MIT) para el Gantt del Timeliner
 - Tailwind v4 + shadcn/ui
 - Supabase Auth (Google OAuth) + Postgres
 - TanStack Query, Zod, `date-fns`
