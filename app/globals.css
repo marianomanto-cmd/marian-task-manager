@@ -262,3 +262,38 @@
   font-weight: 500;
   color: var(--foreground);
 }
+
+/* The task list: title over a small owner + dates line, the way Timeliner
+   always showed it — not SVAR's default Name / Start / Duration table. */
+.tl-gantt .tl-name {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  line-height: 1.25;
+}
+.tl-gantt .tl-name-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+.tl-gantt .tl-name-star { color: var(--color-amber-500); margin-right: 0.25rem; }
+.tl-gantt .tl-name-meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* Milestone labels sit outside the diamond, so cap them: a long title would
+   otherwise run clear across the chart and over the bars beside it. */
+.tl-gantt .tl-milestone-label {
+  max-width: 15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

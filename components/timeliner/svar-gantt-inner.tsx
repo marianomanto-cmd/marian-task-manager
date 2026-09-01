@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { addDays, format, isWeekend, parseISO } from "date-fns";
+import { es } from "date-fns/locale";
 import { useTheme } from "next-themes";
 import { Gantt, Willow, WillowDark } from "@svar-ui/react-gantt";
 
@@ -119,6 +120,8 @@ export default function SvarGanttInner({
     serialize: (config?: { data?: string }) => unknown;
   } | null>(null);
 
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+
   // Rows this component just wrote. `exec("update-task")` comes back through
   // `onUpdateTask` like any other edit, and re-cascading off our own echo
   // would walk the chain twice.
@@ -146,6 +149,80 @@ export default function SvarGanttInner({
     () => buildHolidayMap(holidays, countryKey ? countryKey.split(",") : []),
     [holidays, countryKey],
   );
+
+  /**
+   * Drag a link out of a bar tip.
+   *
+   * SVAR only knows how to build a link from two clicks — one on the source
+   * tip, one on the target's — which works but is not what a Gantt is expected
+   * to do. This adds the drag on top: press a tip, release over another bar,
+   * and the link is made. The pair of tips involved is the link type, exactly
+   * as in the two-click flow (`e2s` finish→start, `s2s`, `e2e`, `s2e`).
+   *
+   * Nothing here interferes with the click flow. A press and release on the
+   * same tip is a click, the target resolves to the source itself, we bail,
+   * and SVAR handles it as before.
+   */
+  React.useEffect(() => {
+    const root = rootRef.current;
+    if (!root || readonly) return;
+
+    /** SVAR stores ids on the bar prefixed with a colon to keep them DOM-safe. */
+    const idOf = (el: HTMLElement | null | undefined) => {
+      const raw = el?.dataset.taskId;
+      if (!raw) return null;
+      return raw.startsWith(":") ? raw.slice(1) : raw;
+    };
+
+    let source: { id: string; start: boolean } | null = null;
+
+    function onDown(ev: PointerEvent) {
+      const tip = (ev.target as HTMLElement | null)?.closest?.<HTMLElement>(".wx-link");
+      if (!tip) return;
+      const id = idOf(tip.closest<HTMLElement>("[data-task-id]"));
+      if (!id) return;
+      source = { id, start: tip.classList.contains("wx-left") };
+    }
+
+    function onUp(ev: PointerEvent) {
+      const from = source;
+      source = null;
+      if (!from) return;
+
+      const under = document
+        .elementFromPoint(ev.clientX, ev.clientY)
+        ?.closest<HTMLElement>("[data-task-id]");
+      const targetId = idOf(under);
+      // Released on nothing, or back on the source: leave it to SVAR's click.
+      if (!targetId || targetId === from.id) return;
+
+      // Dropped straight on a tip? Use it. Otherwise the half of the bar
+      // decides, the way every other Gantt behaves.
+      const tip = (ev.target as HTMLElement | null)?.closest?.<HTMLElement>(".wx-link");
+      let toStart: boolean;
+      if (tip && idOf(tip.closest<HTMLElement>("[data-task-id]")) === targetId) {
+        toStart = tip.classList.contains("wx-left");
+      } else {
+        const rect = under!.getBoundingClientRect();
+        toStart = ev.clientX < rect.left + rect.width / 2;
+      }
+
+      void apiRef.current?.exec("add-link", {
+        link: {
+          source: from.id,
+          target: targetId,
+          type: `${from.start ? "s" : "e"}2${toStart ? "s" : "e"}`,
+        },
+      });
+    }
+
+    root.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      root.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [readonly]);
 
   /**
    * Weekend and holiday tints, in the same palette as the rest of the app.
@@ -242,33 +319,47 @@ export default function SvarGanttInner({
     [],
   );
 
+  /**
+   * One column, not a spreadsheet.
+   *
+   * SVAR's default grid is a table of Name / Start / Duration, which turns the
+   * left of the chart into a second UI competing with the bars. Timeliner only
+   * ever had a list of what the rows are, so that is what stays: the title,
+   * with the owner and the dates underneath in small type.
+   */
+  const NameCell = React.useCallback(
+    ({ row }: { row: { id?: unknown; text?: string } }) => {
+      const item =
+        typeof row.id === "string" ? liveRef.current.itemsById.get(row.id) : undefined;
+      if (!item) {
+        return <span className="tl-name-title">{row.text}</span>;
+      }
+      const owner = ownerInfo(item.owner_key)?.label ?? "Sin owner";
+      const start = format(parseISO(item.start_date), "d MMM", { locale: es });
+      const span =
+        item.kind === "milestone"
+          ? start
+          : `${start} – ${format(parseISO(item.end_date), "d MMM", { locale: es })}`;
+      return (
+        <span className="tl-name">
+          <span className="tl-name-title">
+            {item.is_key ? <span className="tl-name-star">★</span> : null}
+            {item.title}
+          </span>
+          <span className="tl-name-meta">
+            {owner} · {span}
+          </span>
+        </span>
+      );
+    },
+    [],
+  );
+
   const columns = React.useMemo(
     () => [
-      { id: "text", header: "Tarea / hito", flexgrow: 2, width: 190 },
-      {
-        id: "owner",
-        header: "Owner",
-        width: 96,
-        template: (_v: unknown, task: { id?: unknown }) => {
-          const item =
-            typeof task.id === "string"
-              ? liveRef.current.itemsById.get(task.id)
-              : undefined;
-          return ownerInfo(item?.owner_key ?? null)?.label ?? "";
-        },
-      },
-      {
-        id: "start",
-        header: "Inicio",
-        width: 92,
-        align: "center" as const,
-        // The default renders "04-09-2026", which wraps in this width.
-        template: (value: unknown) =>
-          value instanceof Date ? format(value, "d MMM") : "",
-      },
-      { id: "duration", header: "Días", width: 52, align: "center" as const },
+      { id: "text", header: "Tarea / hito", width: 280, flexgrow: 1, cell: NameCell },
     ],
-    [],
+    [NameCell],
   );
 
   /**
@@ -409,7 +500,10 @@ export default function SvarGanttInner({
   }, [readonly, baseline, advanceBaseline]);
 
   return (
-    <div className="tl-gantt bg-card overflow-hidden rounded-xl border">
+    <div
+      ref={rootRef}
+      className="tl-gantt bg-card overflow-hidden rounded-xl border"
+    >
       {/* fonts={false}: no Open Sans / Roboto fetch from svar's CDN either. */}
       <Theme fonts={false}>
         <Gantt
