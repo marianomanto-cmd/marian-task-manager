@@ -45,6 +45,26 @@ export type TimelineItem = {
   position: number;
 };
 
+/**
+ * The little a MASTER view needs to know about a timeline: who it is and
+ * where it sits in the tab order. `Timeline` satisfies it structurally, so
+ * the team board passes its full rows and the public link passes just these.
+ */
+export type MasterTimeline = {
+  id: string;
+  name: string;
+  position: number;
+};
+
+/** Everything a public MASTER link renders, in one snapshot. */
+export type PublicMasterData = {
+  timelines: MasterTimeline[];
+  /** Milestones only — MASTER never shows tasks. */
+  milestones: TimelineItem[];
+  /** When the server read this snapshot, ISO. */
+  fetched_at: string;
+};
+
 /** Everything a public share link renders, in one snapshot. */
 export type PublicTimelineData = {
   timeline: PublicTimeline;

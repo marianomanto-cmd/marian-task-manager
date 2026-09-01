@@ -27,6 +27,7 @@ import {
 import { GanttChart } from "@/components/timeliner/gantt-chart";
 import { ItemEditor } from "@/components/timeliner/item-editor";
 import { MasterView } from "@/components/timeliner/master-view";
+import { ShareMasterButton } from "@/components/timeliner/share-master-button";
 import { ShareTimelineButton } from "@/components/timeliner/share-timeline-button";
 import {
   TIMELINER_KEY,
@@ -76,6 +77,7 @@ export function TimelinerBoard() {
     () => query.data?.data.groups ?? [],
     [query.data?.data.groups],
   );
+  const masterShareToken = query.data?.data.master_share_token ?? null;
 
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   // MASTER is a view across every timeline, not a timeline: in that mode there
@@ -185,7 +187,9 @@ export function TimelinerBoard() {
             “Compartir”.
           </p>
         </div>
-        {selected ? (
+        {masterMode ? (
+          <ShareMasterButton token={masterShareToken} />
+        ) : selected ? (
           <div className="flex flex-wrap items-center gap-1.5">
             <Button
               type="button"
@@ -241,6 +245,12 @@ export function TimelinerBoard() {
           >
             <LayoutGrid className="size-3" />
             MASTER
+            {masterShareToken ? (
+              <Link2
+                className="size-3 shrink-0 opacity-70"
+                aria-label="Compartido por link"
+              />
+            ) : null}
           </button>
         ) : null}
         {timelines.map((t) => (

@@ -9,7 +9,13 @@ export const TIMELINER_KEY = ["timeliner"] as const;
 export type TimelinerQueryResult =
   | { data: TimelinerData; authRequired: false; error: null }
   | {
-      data: { timelines: []; groups: []; items: []; holidays: [] };
+      data: {
+        timelines: [];
+        groups: [];
+        items: [];
+        holidays: [];
+        master_share_token: null;
+      };
       authRequired: boolean;
       error: string;
     };
@@ -24,7 +30,13 @@ export function useTimeliner(): UseQueryResult<TimelinerQueryResult> {
         return { data: result.data, authRequired: false, error: null };
       }
       return {
-        data: { timelines: [], groups: [], items: [], holidays: [] },
+        data: {
+          timelines: [],
+          groups: [],
+          items: [],
+          holidays: [],
+          master_share_token: null,
+        },
         authRequired: result.code === "auth_required",
         error: result.message,
       };

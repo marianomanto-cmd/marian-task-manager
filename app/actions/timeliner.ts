@@ -135,6 +135,8 @@ export type TimelinerData = {
   groups: TimelineGroup[];
   items: TimelineItem[];
   holidays: Holiday[];
+  /** MASTER's public link (`/m/<token>`), or null while it isn't shared. */
+  master_share_token: string | null;
 };
 
 export async function getTimelinerAction(): Promise<
@@ -145,7 +147,8 @@ export async function getTimelinerAction(): Promise<
 
   try {
     const supabase = await createClient();
-    const [timelinesRes, itemsRes, groupsRes, holidaysRes] = await Promise.all([
+    const [timelinesRes, itemsRes, groupsRes, holidaysRes, masterRes] =
+      await Promise.all([
       supabase
         .from("timelines")
         .select(TIMELINE_COLUMNS)
@@ -161,6 +164,10 @@ export async function getTimelinerAction(): Promise<
         .select(GROUP_COLUMNS)
         .order("position", { ascending: true }),
       supabase.from("holidays").select("country, date, name"),
+      supabase
+        .from("timeline_master_share")
+        .select("share_token")
+        .maybeSingle(),
     ]);
     if (timelinesRes.error) throw new Error(timelinesRes.error.message);
     if (itemsRes.error) throw new Error(itemsRes.error.message);
@@ -172,6 +179,12 @@ export async function getTimelinerAction(): Promise<
     const holidays = holidaysRes.error
       ? []
       : ((holidaysRes.data ?? []) as Holiday[]);
+    // Optional too: before migration 0031 the table isn't there, and MASTER
+    // simply has no link to offer.
+    const masterShareToken = masterRes.error
+      ? null
+      : ((masterRes.data as { share_token: string | null } | null)
+          ?.share_token ?? null);
 
     return {
       ok: true,
@@ -180,6 +193,7 @@ export async function getTimelinerAction(): Promise<
         groups,
         items: (itemsRes.data ?? []) as TimelineItem[],
         holidays,
+        master_share_token: masterShareToken,
       },
     };
   } catch (err) {
@@ -395,6 +409,50 @@ export async function revokeTimelineShareTokenAction(
       .single();
     if (error) throw new Error(error.message);
     return { ok: true, data: data as Timeline };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+/**
+ * Create or rotate MASTER's public link. There is one for the whole
+ * workspace, so this writes the singleton row from migration 0031.
+ */
+export async function rotateMasterShareTokenAction(): Promise<
+  ActionResult<{ token: string }>
+> {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const token = crypto.randomUUID();
+    const { error } = await supabase
+      .from("timeline_master_share")
+      .update({ share_token: token })
+      .eq("id", true);
+    if (error) throw new Error(error.message);
+    return { ok: true, data: { token } };
+  } catch (err) {
+    return asUnknown(err);
+  }
+}
+
+/** Stop sharing MASTER: the link 404s from here on. */
+export async function revokeMasterShareTokenAction(): Promise<
+  ActionResult<{ token: null }>
+> {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.result;
+
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from("timeline_master_share")
+      .update({ share_token: null })
+      .eq("id", true);
+    if (error) throw new Error(error.message);
+    return { ok: true, data: { token: null } };
   } catch (err) {
     return asUnknown(err);
   }

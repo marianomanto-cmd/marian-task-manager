@@ -3,6 +3,8 @@ import { createServerClient } from "@supabase/ssr";
 
 import type {
   Holiday,
+  MasterTimeline,
+  PublicMasterData,
   PublicTimeline,
   PublicTimelineData,
   TimelineGroup,
@@ -77,6 +79,43 @@ export const loadPublicTimeline = cache(async function loadPublicTimeline(
     items: (itemsRes.data ?? []) as TimelineItem[],
     // Holidays are decoration: if that read fails the timeline still renders.
     holidays: holidaysRes.error ? [] : ((holidaysRes.data ?? []) as Holiday[]),
+    fetched_at: new Date().toISOString(),
+  };
+});
+
+/**
+ * Load the MASTER snapshot behind a share token, or null when the token is
+ * malformed, unknown or revoked.
+ *
+ * MASTER spans every timeline, so this link shows every project's name and
+ * dates — it is a team link, not a client one, and the share UI says so. The
+ * SQL still only answers a token that matches the singleton in
+ * `timeline_master_share`, and it returns hitos only: tasks never leave the
+ * app through here.
+ */
+export const loadPublicMaster = cache(async function loadPublicMaster(
+  token: string,
+): Promise<PublicMasterData | null> {
+  if (!isShareToken(token)) return null;
+
+  const supabase = anonClient();
+  const p_token = token.toLowerCase();
+
+  const [timelinesRes, milestonesRes] = await Promise.all([
+    supabase.rpc("get_public_master_timelines", { p_token }),
+    supabase.rpc("get_public_master_milestones", { p_token }),
+  ]);
+
+  if (timelinesRes.error || milestonesRes.error) return null;
+
+  const timelines = (timelinesRes.data ?? []) as MasterTimeline[];
+  // No timelines at all = the token matches nothing (revoked, rotated, made
+  // up). A workspace with zero timelines has nothing to share either way.
+  if (timelines.length === 0) return null;
+
+  return {
+    timelines,
+    milestones: (milestonesRes.data ?? []) as TimelineItem[],
     fetched_at: new Date().toISOString(),
   };
 });

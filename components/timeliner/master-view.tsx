@@ -16,7 +16,7 @@ import { buildDayRange, buildMonthSegments, ownerColors } from "@/lib/timeliner/
 import {
   TIMELINE_OWNERS,
   ownerInfo,
-  type Timeline,
+  type MasterTimeline,
   type TimelineItem,
 } from "@/lib/timeliner/types";
 import { cn } from "@/lib/utils";
@@ -78,7 +78,7 @@ type Placed = {
 };
 
 type Lane = {
-  timeline: Timeline;
+  timeline: MasterTimeline;
   milestones: TimelineItem[];
   placed: Placed[];
   rows: number;
@@ -89,9 +89,10 @@ export function MasterView({
   items,
   onOpenTimeline,
 }: {
-  timelines: Timeline[];
+  timelines: MasterTimeline[];
   items: TimelineItem[];
-  onOpenTimeline: (id: string) => void;
+  /** Omitted on the public link, where there is no timeline to open. */
+  onOpenTimeline?: (id: string) => void;
 }) {
   const [view, setView] = React.useState<"chart" | "list">("chart");
   const [zoomIdx, setZoomIdx] = React.useState(1);
@@ -304,14 +305,20 @@ export function MasterView({
                     )}
                     style={{ width: NAME_W }}
                   >
-                    <button
-                      type="button"
-                      onClick={() => onOpenTimeline(lane.timeline.id)}
-                      className="hover:text-primary min-w-0 flex-1 truncate text-left text-sm font-medium transition-colors"
-                      title={`Abrir ${lane.timeline.name}`}
-                    >
-                      {lane.timeline.name}
-                    </button>
+                    {onOpenTimeline ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenTimeline(lane.timeline.id)}
+                        className="hover:text-primary min-w-0 flex-1 truncate text-left text-sm font-medium transition-colors"
+                        title={`Abrir ${lane.timeline.name}`}
+                      >
+                        {lane.timeline.name}
+                      </button>
+                    ) : (
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                        {lane.timeline.name}
+                      </span>
+                    )}
                     <span className="text-muted-foreground inline-flex shrink-0 items-center gap-1 text-[11px] tabular-nums">
                       <Flag className="size-3" />
                       {lane.milestones.length}
@@ -354,7 +361,11 @@ export function MasterView({
                         left={left}
                         top={LANE_PAD + row * SUB_ROW_H}
                         withLabel={withLabels}
-                        onOpen={() => onOpenTimeline(item.timeline_id)}
+                        onOpen={
+                          onOpenTimeline
+                            ? () => onOpenTimeline(item.timeline_id)
+                            : undefined
+                        }
                       />
                     ))}
                   </div>
@@ -412,17 +423,20 @@ function MilestoneChip({
   left: number;
   top: number;
   withLabel: boolean;
-  onOpen: () => void;
+  onOpen?: () => void;
 }) {
   const colors = ownerColors(item.owner_key);
   const ownerLabel = ownerInfo(item.owner_key)?.label ?? "Sin owner";
   const date = parseISO(item.start_date);
+  const Tag = onOpen ? "button" : "div";
   return (
-    <button
-      type="button"
-      onClick={onOpen}
+    <Tag
+      {...(onOpen ? { type: "button" as const, onClick: onOpen } : {})}
       title={`${item.title} · ${format(date, "d MMM yyyy", { locale: es })} · ${ownerLabel}`}
-      className="hover:bg-background/80 absolute z-10 flex items-center gap-1.5 rounded pr-1.5 text-left transition-colors"
+      className={cn(
+        "absolute z-10 flex items-center gap-1.5 rounded pr-1.5 text-left transition-colors",
+        onOpen && "hover:bg-background/80",
+      )}
       style={{ left, top, height: SUB_ROW_H }}
     >
       <span
@@ -444,7 +458,7 @@ function MilestoneChip({
           </span>
         </>
       ) : null}
-    </button>
+    </Tag>
   );
 }
 
@@ -459,10 +473,10 @@ function MasterList({
   today,
   onOpenTimeline,
 }: {
-  timelines: Timeline[];
+  timelines: MasterTimeline[];
   milestones: TimelineItem[];
   today: Date;
-  onOpenTimeline: (id: string) => void;
+  onOpenTimeline?: (id: string) => void;
 }) {
   const nameById = React.useMemo(() => {
     const m = new Map<string, string>();
@@ -501,6 +515,7 @@ function MasterList({
   }
 
   const todayISO = format(today, "yyyy-MM-dd");
+  const RowTag = onOpenTimeline ? "button" : "div";
 
   return (
     <div className="bg-card overflow-auto rounded-xl border" style={{ maxHeight: "72vh" }}>
@@ -517,11 +532,18 @@ function MasterList({
             const d = parseISO(item.start_date);
             const past = item.start_date < todayISO;
             return (
-              <button
+              <RowTag
                 key={item.id}
-                type="button"
-                onClick={() => onOpenTimeline(item.timeline_id)}
-                className="hover:bg-muted/50 flex w-full items-center gap-3 border-b px-3 py-2 text-left transition-colors last:border-b-0"
+                {...(onOpenTimeline
+                  ? {
+                      type: "button" as const,
+                      onClick: () => onOpenTimeline(item.timeline_id),
+                    }
+                  : {})}
+                className={cn(
+                  "flex w-full items-center gap-3 border-b px-3 py-2 text-left transition-colors last:border-b-0",
+                  onOpenTimeline && "hover:bg-muted/50",
+                )}
               >
                 <span
                   className={cn(
@@ -549,7 +571,7 @@ function MasterList({
                 <span className="text-muted-foreground hidden shrink-0 truncate text-xs sm:block sm:max-w-[14rem]">
                   {nameById.get(item.timeline_id) ?? ""}
                 </span>
-              </button>
+              </RowTag>
             );
           })}
         </div>
