@@ -8,7 +8,6 @@ import {
   Download,
   Flag,
   Layers,
-  LayoutGrid,
   Link2,
   ListTodo,
   Pencil,
@@ -18,31 +17,18 @@ import {
 
 import {
   createTimelineAction,
-  createTimelineDependencyAction,
   createTimelineGroupAction,
   createTimelineItemAction,
   deleteTimelineAction,
-  deleteTimelineDependencyAction,
-  deleteTimelineItemAction,
   renameTimelineAction,
-  reorderTimelineItemsAction,
-  rescheduleTimelineItemsAction,
-  updateTimelineDependencyAction,
   updateTimelineSettingsAction,
-  type TimelinerData,
 } from "@/app/actions/timeliner";
-import type { ActionResult } from "@/lib/actions/result";
+import { GanttChart } from "@/components/timeliner/gantt-chart";
 import { ItemEditor } from "@/components/timeliner/item-editor";
-import { MasterView } from "@/components/timeliner/master-view";
-import {
-  SvarGantt,
-  type SvarGanttHandlers,
-} from "@/components/timeliner/svar-gantt";
 import { ShareTimelineButton } from "@/components/timeliner/share-timeline-button";
 import {
   TIMELINER_KEY,
   useTimeliner,
-  type TimelinerQueryResult,
 } from "@/components/timeliner/use-timeliner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,18 +41,11 @@ import { Switch } from "@/components/ui/switch";
 import { showToast } from "@/components/ui/toast";
 import { exportTimelineXlsx } from "@/lib/timeliner/export-xlsx";
 import {
-  TEMPLATE_ITEMS,
-  defaultTemplateAnchor,
-} from "@/lib/timeliner/template";
-import {
   HOLIDAY_COUNTRIES,
   type TimelineItem,
   type TimelineItemKind,
 } from "@/lib/timeliner/types";
 import { cn } from "@/lib/utils";
-
-/** Sentinel id for the cross-timeline MASTER tab. */
-const MASTER_TAB = "__master__";
 
 export function TimelinerBoard() {
   const query = useTimeliner();
@@ -88,17 +67,10 @@ export function TimelinerBoard() {
     () => query.data?.data.groups ?? [],
     [query.data?.data.groups],
   );
-  const allDependencies = React.useMemo(
-    () => query.data?.data.dependencies ?? [],
-    [query.data?.data.dependencies],
-  );
 
-  // `MASTER` is a view, not a timeline: it reads across all of them.
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
-  const masterMode = selectedId === MASTER_TAB;
-  const selected = masterMode
-    ? null
-    : (timelines.find((t) => t.id === selectedId) ?? timelines[0] ?? null);
+  const selected =
+    timelines.find((t) => t.id === selectedId) ?? timelines[0] ?? null;
 
   const items = React.useMemo(
     () => (selected ? allItems.filter((i) => i.timeline_id === selected.id) : []),
@@ -107,13 +79,6 @@ export function TimelinerBoard() {
   const groups = React.useMemo(
     () => (selected ? allGroups.filter((g) => g.timeline_id === selected.id) : []),
     [allGroups, selected],
-  );
-  const dependencies = React.useMemo(
-    () =>
-      selected
-        ? allDependencies.filter((d) => d.timeline_id === selected.id)
-        : [],
-    [allDependencies, selected],
   );
 
   const quickAddMutation = useMutation({
@@ -136,162 +101,6 @@ export function TimelinerBoard() {
     onSuccess: () => qc.invalidateQueries({ queryKey: TIMELINER_KEY }),
     onError: (err: Error) => showToast({ title: err.message }),
   });
-
-  /**
-   * Everything the chart reports, written straight through to Postgres.
-   *
-   * SVAR owns the on-screen state during a gesture — that is what makes the
-   * drag feel immediate and what moves the successors of a link for us — so
-   * these only persist the result. `mutate` without an optimistic patch is
-   * deliberate: the chart already shows the new position, and re-feeding it
-   * would fight the component for control of the same row.
-   */
-  /**
-   * Rebuild counter for the chart. SVAR owns its state once mounted and
-   * deliberately ignores new props, so the only way to make it forget an edit
-   * the server refused is to mount it again over fresh data.
-   */
-  const [chartEpoch, setChartEpoch] = React.useState(0);
-
-  /** Write a change straight into the cached snapshot. */
-  const patchData = React.useCallback(
-    (fn: (data: TimelinerData) => TimelinerData) => {
-      qc.setQueryData<TimelinerQueryResult>(TIMELINER_KEY, (old) =>
-        !old || old.error !== null ? old : { ...old, data: fn(old.data) },
-      );
-    },
-    [qc],
-  );
-
-  /**
-   * Save what the chart reports, and keep everything else in step.
-   *
-   * On success the cached snapshot is patched rather than refetched: the chart
-   * already shows the new state, and MASTER, the Excel export and the next tab
-   * switch all read that same cache — without this they would happily show the
-   * plan as it was before the drag.
-   *
-   * On failure the chart is the one holding the wrong story, so the stored plan
-   * is pulled back in and the chart is rebuilt on top of it.
-   */
-  const persist = React.useCallback(
-    async <T,>(
-      run: () => Promise<ActionResult<T>>,
-      onOk?: (data: T) => void,
-    ) => {
-      const res = await run();
-      if (res.ok) {
-        onOk?.(res.data);
-        return;
-      }
-      showToast({ title: res.message });
-      await qc.invalidateQueries({ queryKey: TIMELINER_KEY });
-      setChartEpoch((n) => n + 1);
-    },
-    [qc],
-  );
-
-  const ganttHandlers: SvarGanttHandlers = React.useMemo(
-    () => ({
-      onDates: (changes) => {
-        if (!selected || changes.length === 0) return;
-        // One write for the whole chain: the bar that moved and everything its
-        // dependencies pulled along with it.
-        void persist(
-          () =>
-            rescheduleTimelineItemsAction({
-              timeline_id: selected.id,
-              items: changes,
-            }),
-          () => {
-            const byId = new Map(changes.map((c) => [c.id, c]));
-            patchData((d) => ({
-              ...d,
-              items: d.items.map((it) => {
-                const c = byId.get(it.id);
-                return c
-                  ? { ...it, start_date: c.start_date, end_date: c.end_date }
-                  : it;
-              }),
-            }));
-          },
-        );
-      },
-      onAddLink: (link) => {
-        if (!selected) return;
-        void persist(
-          () =>
-            createTimelineDependencyAction({ timeline_id: selected.id, ...link }),
-          (dep) =>
-            patchData((d) => ({
-              ...d,
-              dependencies: [
-                ...d.dependencies.filter((x) => x.id !== dep.id),
-                dep,
-              ],
-            })),
-        );
-      },
-      onUpdateLink: (id, patch) => {
-        void persist(
-          () => updateTimelineDependencyAction({ id, ...patch }),
-          (dep) =>
-            patchData((d) => ({
-              ...d,
-              dependencies: d.dependencies.map((x) => (x.id === dep.id ? dep : x)),
-            })),
-        );
-      },
-      onDeleteLink: (id) => {
-        void persist(
-          () => deleteTimelineDependencyAction(id),
-          () =>
-            patchData((d) => ({
-              ...d,
-              dependencies: d.dependencies.filter((x) => x.id !== id),
-            })),
-        );
-      },
-      onDeleteItem: (id) => {
-        void persist(
-          () => deleteTimelineItemAction(id),
-          () =>
-            patchData((d) => ({
-              ...d,
-              items: d.items.filter((x) => x.id !== id),
-              // The row is gone, so any link that hung off it is gone too.
-              dependencies: d.dependencies.filter(
-                (x) => x.from_item_id !== id && x.to_item_id !== id,
-              ),
-            })),
-        );
-      },
-      onReorder: (rows) => {
-        if (!selected) return;
-        void persist(
-          () =>
-            reorderTimelineItemsAction({
-              timeline_id: selected.id,
-              items: rows,
-            }),
-          () => {
-            const byId = new Map(rows.map((r) => [r.id, r]));
-            patchData((d) => ({
-              ...d,
-              items: d.items.map((it) => {
-                const r = byId.get(it.id);
-                return r
-                  ? { ...it, position: r.position, group_id: r.group_id }
-                  : it;
-              }),
-            }));
-          },
-        );
-      },
-      onEditItem: (item) => openEditor(item),
-    }),
-    [selected, persist, patchData],
-  );
 
   // Item editor (create / edit), remounted per open so fields reset.
   const [editorOpen, setEditorOpen] = React.useState(false);
@@ -335,12 +144,7 @@ export function TimelinerBoard() {
 
   function exportExcel() {
     if (!selected) return;
-    exportTimelineXlsx({
-      timeline: selected,
-      items,
-      dependencies,
-      holidays,
-    }).catch(
+    exportTimelineXlsx({ timeline: selected, items, holidays }).catch(
       (err: unknown) =>
         showToast({
           title: err instanceof Error ? err.message : "No se pudo exportar",
@@ -360,10 +164,8 @@ export function TimelinerBoard() {
           </h1>
           <p className="text-muted-foreground text-xs">
             Armá el cronograma del proyecto: tareas con duración, hitos y
-            owners. Arrastrá las barras para mover o estirar, tirá un conector
-            desde la punta de una barra hasta otra tarea para encadenarlas, y
-            usá la manija ⋮⋮ de la izquierda para reordenar las filas. Un
-            timeline nuevo ya viene con el proyecto base cargado. Visible y
+            owners. Arrastrá las barras para mover o estirar, y usá la
+            manija ⋮⋮ de la izquierda para reordenar las filas. Visible y
             editable por el equipo, y compartible con el cliente en sólo
             lectura desde “Compartir”.
           </p>
@@ -410,20 +212,6 @@ export function TimelinerBoard() {
         <span className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
           Timeline
         </span>
-        <button
-          type="button"
-          onClick={() => setSelectedId(MASTER_TAB)}
-          title="Planning de todos los timelines"
-          className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold tracking-wide transition-colors",
-            masterMode
-              ? "border-primary bg-primary text-primary-foreground"
-              : "bg-background hover:bg-accent",
-          )}
-        >
-          <LayoutGrid className="size-3" />
-          MASTER
-        </button>
         {timelines.map((t) => (
           <button
             key={t.id}
@@ -532,25 +320,16 @@ export function TimelinerBoard() {
 
       {query.isLoading ? (
         <p className="text-muted-foreground text-sm">Cargando…</p>
-      ) : masterMode ? (
-        <MasterView
-          timelines={timelines}
-          items={allItems}
-          holidays={holidays}
-          onOpenTimeline={(id) => setSelectedId(id)}
-        />
       ) : !selected ? (
         <EmptyTimelines onCreated={(id) => setSelectedId(id)} />
       ) : (
         <>
-          <SvarGantt
-            key={`${selected.id}:${chartEpoch}`}
+          <GanttChart
             timeline={selected}
             groups={groups}
             items={items}
-            dependencies={dependencies}
             holidays={holidays}
-            handlers={ganttHandlers}
+            onEditItem={(item) => openEditor(item)}
           />
           <button
             type="button"
@@ -584,18 +363,10 @@ function NewTimelinePopover({ onCreated }: { onCreated: (id: string) => void }) 
   const qc = useQueryClient();
   const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState("");
-  // On by default: a new timeline arrives as a whole project you reshape,
-  // which beats building the same twenty tasks by hand every time.
-  const [useTemplate, setUseTemplate] = React.useState(true);
-  const [anchor, setAnchor] = React.useState(() => defaultTemplateAnchor());
 
   const createMutation = useMutation({
     mutationFn: async (n: string) => {
-      const res = await createTimelineAction({
-        name: n,
-        use_template: useTemplate,
-        anchor_date: anchor,
-      });
+      const res = await createTimelineAction({ name: n });
       if (!res.ok) throw new Error(res.message);
       return res.data;
     },
@@ -626,7 +397,7 @@ function NewTimelinePopover({ onCreated }: { onCreated: (id: string) => void }) 
           <Plus className="size-3.5" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 space-y-3">
+      <PopoverContent align="start" className="w-64 space-y-2">
         <div className="text-xs font-medium">Nuevo timeline</div>
         <div className="flex items-center gap-2">
           <Input
@@ -652,30 +423,6 @@ function NewTimelinePopover({ onCreated }: { onCreated: (id: string) => void }) 
             <Plus className="size-3.5" />
           </Button>
         </div>
-
-        <label className="flex cursor-pointer items-center justify-between gap-2 text-xs">
-          <span>
-            Con el proyecto base
-            <span className="text-muted-foreground block text-[11px]">
-              {TEMPLATE_ITEMS.length} tareas e hitos ya encadenados
-            </span>
-          </span>
-          <Switch checked={useTemplate} onCheckedChange={setUseTemplate} />
-        </label>
-
-        {useTemplate ? (
-          <div className="space-y-1">
-            <label className="text-muted-foreground text-[11px] font-medium">
-              Arranca el
-            </label>
-            <Input
-              type="date"
-              value={anchor}
-              onChange={(e) => setAnchor(e.target.value || anchor)}
-              className="h-8"
-            />
-          </div>
-        ) : null}
       </PopoverContent>
     </Popover>
   );

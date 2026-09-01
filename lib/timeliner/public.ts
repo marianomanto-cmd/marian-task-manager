@@ -5,7 +5,6 @@ import type {
   Holiday,
   PublicTimeline,
   PublicTimelineData,
-  TimelineDependency,
   TimelineGroup,
   TimelineItem,
 } from "@/lib/timeliner/types";
@@ -57,14 +56,12 @@ export const loadPublicTimeline = cache(async function loadPublicTimeline(
   const supabase = anonClient();
   const p_token = token.toLowerCase();
 
-  const [timelineRes, groupsRes, itemsRes, depsRes, holidaysRes] =
-    await Promise.all([
-      supabase.rpc("get_public_timeline", { p_token }),
-      supabase.rpc("get_public_timeline_groups", { p_token }),
-      supabase.rpc("get_public_timeline_items", { p_token }),
-      supabase.rpc("get_public_timeline_dependencies", { p_token }),
-      supabase.rpc("get_public_timeline_holidays", { p_token }),
-    ]);
+  const [timelineRes, groupsRes, itemsRes, holidaysRes] = await Promise.all([
+    supabase.rpc("get_public_timeline", { p_token }),
+    supabase.rpc("get_public_timeline_groups", { p_token }),
+    supabase.rpc("get_public_timeline_items", { p_token }),
+    supabase.rpc("get_public_timeline_holidays", { p_token }),
+  ]);
 
   if (timelineRes.error) return null;
 
@@ -78,11 +75,7 @@ export const loadPublicTimeline = cache(async function loadPublicTimeline(
     timeline,
     groups: (groupsRes.data ?? []) as TimelineGroup[],
     items: (itemsRes.data ?? []) as TimelineItem[],
-    // Arrows and holidays are decoration: if either read fails the timeline
-    // still renders, just without them.
-    dependencies: depsRes.error
-      ? []
-      : ((depsRes.data ?? []) as TimelineDependency[]),
+    // Holidays are decoration: if that read fails the timeline still renders.
     holidays: holidaysRes.error ? [] : ((holidaysRes.data ?? []) as Holiday[]),
     fetched_at: new Date().toISOString(),
   };

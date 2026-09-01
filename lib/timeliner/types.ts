@@ -43,37 +43,6 @@ export type TimelineItem = {
   end_date: string;
   kind: TimelineItemKind;
   position: number;
-  /**
-   * Important enough to show in the cross-timeline MASTER view. Milestones
-   * count as key on their own, so this only ever needs setting on tasks.
-   */
-  is_key: boolean;
-};
-
-/**
- * The four classic Gantt links, named by the endpoints they join:
- * predecessor endpoint → successor endpoint.
- *
- * - `FS` finish → start: the successor starts after the predecessor ends.
- * - `SS` start → start, `FF` finish → finish, `SF` start → finish.
- *
- * Which one you get is decided by where you drag from and where you drop: the
- * left tip of a bar is its start, the right tip its finish. SVAR names the
- * same four `s2s` / `s2e` / `e2s` / `e2e`; `lib/timeliner/svar-adapter.ts`
- * translates between the two.
- */
-export type TimelineDependencyType = "FS" | "SS" | "FF" | "SF";
-
-export type TimelineDependency = {
-  id: string;
-  timeline_id: string;
-  /** Predecessor. */
-  from_item_id: string;
-  /** Successor — the one that moves when the predecessor does. */
-  to_item_id: string;
-  dep_type: TimelineDependencyType;
-  /** Days of slack the link enforces on top of its type; negative = overlap. */
-  lag_days: number;
 };
 
 /** Everything a public share link renders, in one snapshot. */
@@ -81,7 +50,6 @@ export type PublicTimelineData = {
   timeline: PublicTimeline;
   groups: TimelineGroup[];
   items: TimelineItem[];
-  dependencies: TimelineDependency[];
   holidays: Holiday[];
   /** When the server read this snapshot, ISO — drives the "updated" stamp. */
   fetched_at: string;

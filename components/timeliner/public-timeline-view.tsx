@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CalendarRange, RefreshCw } from "lucide-react";
 
 import { getPublicTimelineAction } from "@/app/actions/timeliner-public";
-import { SvarGantt } from "@/components/timeliner/svar-gantt";
+import { PublicGantt } from "@/components/timeliner/public-gantt";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import {
@@ -73,8 +73,7 @@ export function PublicTimelineView({
     );
   }
 
-  const { timeline, groups, items, dependencies, holidays, fetched_at } =
-    state.data;
+  const { timeline, groups, items, holidays, fetched_at } = state.data;
   const activeCountries = HOLIDAY_COUNTRIES.filter((c) =>
     timeline.holiday_countries.includes(c.code),
   );
@@ -101,14 +100,11 @@ export function PublicTimelineView({
           </div>
         </div>
 
-        <SvarGantt
-          key={timeline.id}
+        <PublicGantt
           timeline={timeline}
           groups={groups}
           items={items}
-          dependencies={dependencies}
           holidays={holidays}
-          readonly
         />
 
         <p className="text-muted-foreground/70 text-[11px]">

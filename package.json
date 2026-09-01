@@ -25,7 +25,6 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.4",
-    "@svar-ui/react-gantt": "^2.7.1",
     "@tanstack/react-query": "^5.100.10",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
