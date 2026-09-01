@@ -92,8 +92,15 @@ export function buildHolidayMap(
 
 export type MonthSegment = { label: string; left: number; width: number };
 
-/** Month bands across the top of the grid. */
-export function buildMonthSegments(days: readonly Date[]): MonthSegment[] {
+/**
+ * Month bands across the top of the grid. `dayW` defaults to the timeline
+ * chart's column width; MASTER passes its own so the same bands work zoomed
+ * out.
+ */
+export function buildMonthSegments(
+  days: readonly Date[],
+  dayW: number = DAY_W,
+): MonthSegment[] {
   const segs: MonthSegment[] = [];
   let i = 0;
   while (i < days.length) {
@@ -103,8 +110,8 @@ export function buildMonthSegments(days: readonly Date[]): MonthSegment[] {
     const label = format(days[i], "MMMM yyyy", { locale: es });
     segs.push({
       label: label.charAt(0).toUpperCase() + label.slice(1),
-      left: i * DAY_W,
-      width: (j - i) * DAY_W,
+      left: i * dayW,
+      width: (j - i) * dayW,
     });
     i = j;
   }

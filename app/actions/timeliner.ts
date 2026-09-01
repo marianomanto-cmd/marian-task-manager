@@ -9,6 +9,11 @@ import type {
   TimelineGroup,
   TimelineItem,
 } from "@/lib/timeliner/types";
+import {
+  TEMPLATE_GROUPS,
+  buildTemplateRows,
+  defaultTemplateAnchor,
+} from "@/lib/timeliner/template";
 import { createClient } from "@/lib/supabase/server";
 
 const TIMELINE_COLUMNS =
@@ -26,7 +31,13 @@ const kindSchema = z.enum(["task", "milestone"]);
 const ownerSchema = z.enum(["sangria", "client", "third_party"]);
 const countrySchema = z.enum(["AR", "PA", "US", "ES"]);
 
-const createTimelineSchema = z.object({ name: nameSchema });
+const createTimelineSchema = z.object({
+  name: nameSchema,
+  /** Seed the base project (see `lib/timeliner/template.ts`). Default on. */
+  use_template: z.boolean().optional(),
+  /** Monday the template hangs off. Defaults to the coming Monday. */
+  anchor_date: dateSchema.optional(),
+});
 const renameTimelineSchema = z.object({ id: z.string().uuid(), name: nameSchema });
 const settingsSchema = z.object({
   id: z.string().uuid(),
@@ -200,10 +211,68 @@ export async function createTimelineAction(
       .select(TIMELINE_COLUMNS)
       .single();
     if (error) throw new Error(error.message);
-    return { ok: true, data: data as Timeline };
+    const timeline = data as Timeline;
+
+    if (parsed.data.use_template !== false) {
+      await seedTemplate(
+        supabase,
+        timeline.id,
+        parsed.data.anchor_date ?? defaultTemplateAnchor(),
+      );
+    }
+
+    return { ok: true, data: timeline };
   } catch (err) {
     return asUnknown(err);
   }
+}
+
+/**
+ * Fill a brand-new timeline with the base project: the two tracks as groups,
+ * and every task and hito of the template hung off `anchorISO`.
+ *
+ * Seeding is best-effort by design. The timeline itself is already created and
+ * usable, so a failure here leaves an empty timeline rather than losing the
+ * user's click — and the groups are optional scaffolding, so items still land
+ * even if the group insert fails.
+ */
+async function seedTemplate(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  timelineId: string,
+  anchorISO: string,
+): Promise<void> {
+  const { data: groupRows } = await supabase
+    .from("timeline_groups")
+    .insert(
+      TEMPLATE_GROUPS.map((g, i) => ({
+        timeline_id: timelineId,
+        name: g.name,
+        position: i,
+      })),
+    )
+    .select("id, position");
+
+  // Match on `position`, which is the template's group index by construction —
+  // insert order isn't a promise Postgres makes.
+  const groupIdByIndex = new Map<number, string>(
+    ((groupRows ?? []) as { id: string; position: number }[]).map((r) => [
+      r.position,
+      r.id,
+    ]),
+  );
+
+  const rows = buildTemplateRows(anchorISO).map((r) => ({
+    timeline_id: timelineId,
+    group_id: r.group === null ? null : (groupIdByIndex.get(r.group) ?? null),
+    title: r.title,
+    owner_key: r.owner_key,
+    start_date: r.start_date,
+    end_date: r.end_date,
+    kind: r.kind,
+    position: r.position,
+  }));
+
+  await supabase.from("timeline_items").insert(rows);
 }
 
 export async function renameTimelineAction(
