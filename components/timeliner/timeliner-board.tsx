@@ -29,7 +29,9 @@ import {
   rescheduleTimelineItemsAction,
   updateTimelineDependencyAction,
   updateTimelineSettingsAction,
+  type TimelinerData,
 } from "@/app/actions/timeliner";
+import type { ActionResult } from "@/lib/actions/result";
 import { ItemEditor } from "@/components/timeliner/item-editor";
 import { MasterView } from "@/components/timeliner/master-view";
 import {
@@ -40,6 +42,7 @@ import { ShareTimelineButton } from "@/components/timeliner/share-timeline-butto
 import {
   TIMELINER_KEY,
   useTimeliner,
+  type TimelinerQueryResult,
 } from "@/components/timeliner/use-timeliner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -143,15 +146,47 @@ export function TimelinerBoard() {
    * deliberate: the chart already shows the new position, and re-feeding it
    * would fight the component for control of the same row.
    */
+  /**
+   * Rebuild counter for the chart. SVAR owns its state once mounted and
+   * deliberately ignores new props, so the only way to make it forget an edit
+   * the server refused is to mount it again over fresh data.
+   */
+  const [chartEpoch, setChartEpoch] = React.useState(0);
+
+  /** Write a change straight into the cached snapshot. */
+  const patchData = React.useCallback(
+    (fn: (data: TimelinerData) => TimelinerData) => {
+      qc.setQueryData<TimelinerQueryResult>(TIMELINER_KEY, (old) =>
+        !old || old.error !== null ? old : { ...old, data: fn(old.data) },
+      );
+    },
+    [qc],
+  );
+
+  /**
+   * Save what the chart reports, and keep everything else in step.
+   *
+   * On success the cached snapshot is patched rather than refetched: the chart
+   * already shows the new state, and MASTER, the Excel export and the next tab
+   * switch all read that same cache — without this they would happily show the
+   * plan as it was before the drag.
+   *
+   * On failure the chart is the one holding the wrong story, so the stored plan
+   * is pulled back in and the chart is rebuilt on top of it.
+   */
   const persist = React.useCallback(
-    async (run: () => Promise<{ ok: boolean; message?: string }>) => {
+    async <T,>(
+      run: () => Promise<ActionResult<T>>,
+      onOk?: (data: T) => void,
+    ) => {
       const res = await run();
-      if (!res.ok) {
-        showToast({ title: res.message ?? "No se pudo guardar" });
-        // The write failed, so the chart is now ahead of the database; pull the
-        // stored plan back in rather than leave the two disagreeing.
-        qc.invalidateQueries({ queryKey: TIMELINER_KEY });
+      if (res.ok) {
+        onOk?.(res.data);
+        return;
       }
+      showToast({ title: res.message });
+      await qc.invalidateQueries({ queryKey: TIMELINER_KEY });
+      setChartEpoch((n) => n + 1);
     },
     [qc],
   );
@@ -162,40 +197,100 @@ export function TimelinerBoard() {
         if (!selected || changes.length === 0) return;
         // One write for the whole chain: the bar that moved and everything its
         // dependencies pulled along with it.
-        void persist(() =>
-          rescheduleTimelineItemsAction({
-            timeline_id: selected.id,
-            items: changes,
-          }),
+        void persist(
+          () =>
+            rescheduleTimelineItemsAction({
+              timeline_id: selected.id,
+              items: changes,
+            }),
+          () => {
+            const byId = new Map(changes.map((c) => [c.id, c]));
+            patchData((d) => ({
+              ...d,
+              items: d.items.map((it) => {
+                const c = byId.get(it.id);
+                return c
+                  ? { ...it, start_date: c.start_date, end_date: c.end_date }
+                  : it;
+              }),
+            }));
+          },
         );
       },
       onAddLink: (link) => {
         if (!selected) return;
-        void persist(() =>
-          createTimelineDependencyAction({ timeline_id: selected.id, ...link }),
+        void persist(
+          () =>
+            createTimelineDependencyAction({ timeline_id: selected.id, ...link }),
+          (dep) =>
+            patchData((d) => ({
+              ...d,
+              dependencies: [
+                ...d.dependencies.filter((x) => x.id !== dep.id),
+                dep,
+              ],
+            })),
         );
       },
       onUpdateLink: (id, patch) => {
-        void persist(() => updateTimelineDependencyAction({ id, ...patch }));
+        void persist(
+          () => updateTimelineDependencyAction({ id, ...patch }),
+          (dep) =>
+            patchData((d) => ({
+              ...d,
+              dependencies: d.dependencies.map((x) => (x.id === dep.id ? dep : x)),
+            })),
+        );
       },
       onDeleteLink: (id) => {
-        void persist(() => deleteTimelineDependencyAction(id));
+        void persist(
+          () => deleteTimelineDependencyAction(id),
+          () =>
+            patchData((d) => ({
+              ...d,
+              dependencies: d.dependencies.filter((x) => x.id !== id),
+            })),
+        );
       },
       onDeleteItem: (id) => {
-        void persist(() => deleteTimelineItemAction(id));
+        void persist(
+          () => deleteTimelineItemAction(id),
+          () =>
+            patchData((d) => ({
+              ...d,
+              items: d.items.filter((x) => x.id !== id),
+              // The row is gone, so any link that hung off it is gone too.
+              dependencies: d.dependencies.filter(
+                (x) => x.from_item_id !== id && x.to_item_id !== id,
+              ),
+            })),
+        );
       },
       onReorder: (rows) => {
         if (!selected) return;
-        void persist(() =>
-          reorderTimelineItemsAction({
-            timeline_id: selected.id,
-            items: rows,
-          }),
+        void persist(
+          () =>
+            reorderTimelineItemsAction({
+              timeline_id: selected.id,
+              items: rows,
+            }),
+          () => {
+            const byId = new Map(rows.map((r) => [r.id, r]));
+            patchData((d) => ({
+              ...d,
+              items: d.items.map((it) => {
+                const r = byId.get(it.id);
+                return r
+                  ? { ...it, position: r.position, group_id: r.group_id }
+                  : it;
+              }),
+            }));
+          },
         );
       },
       onEditItem: (item) => openEditor(item),
     }),
-    [selected, persist],
+    [selected, persist, patchData],
   );
 
   // Item editor (create / edit), remounted per open so fields reset.
@@ -449,7 +544,7 @@ export function TimelinerBoard() {
       ) : (
         <>
           <SvarGantt
-            key={selected.id}
+            key={`${selected.id}:${chartEpoch}`}
             timeline={selected}
             groups={groups}
             items={items}
