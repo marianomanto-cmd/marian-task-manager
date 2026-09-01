@@ -10,6 +10,7 @@ import "@svar-ui/react-gantt/style.css";
 import { cascadeSchedule, type DateChange } from "@/lib/timeliner/schedule";
 import {
   fromSvarDates,
+  groupIdFromParent,
   isGroupTaskId,
   toDependencyType,
   toSvarLinks,
@@ -64,7 +65,10 @@ export type SvarGanttHandlers = {
   onDeleteLink: (id: string) => void;
   onDeleteItem: (id: string) => void;
   onEditItem: (item: TimelineItem) => void;
-  onMoveItem: (id: string, groupId: string | null, position: number) => void;
+  /** The full vertical order after a row was dragged up or down. */
+  onReorder: (
+    rows: { id: string; group_id: string | null; position: number }[],
+  ) => void;
 };
 
 export default function SvarGanttInner({
@@ -126,6 +130,7 @@ export default function SvarGanttInner({
   const apiRef = React.useRef<{
     exec: (action: string, params: unknown) => Promise<unknown>;
     getTask: (id: string) => { start?: Date; end?: Date } | undefined;
+    serialize: (config?: { data?: string }) => unknown;
   } | null>(null);
 
   // Rows this component just wrote. `exec("update-task")` comes back through
@@ -383,10 +388,20 @@ export default function SvarGanttInner({
       }) => {
         const h = live();
         if (!h || ev.inProgress) return;
-        if (typeof ev.id !== "string" || isGroupTaskId(ev.id)) return;
-        const item = liveRef.current.itemsById.get(ev.id);
-        if (!item) return;
-        h.onMoveItem(ev.id, item.group_id, item.position);
+        const api = apiRef.current;
+        if (!api) return;
+        // A move rewrites the whole order, not just the dragged row, so the
+        // stored positions come from the tree SVAR now holds.
+        const ordered = api.serialize({ data: "tasks" });
+        if (!Array.isArray(ordered)) return;
+        const rows = (ordered as { id?: unknown; parent?: unknown }[])
+          .filter((t) => typeof t.id === "string" && !isGroupTaskId(t.id))
+          .map((t, index) => ({
+            id: t.id as string,
+            group_id: groupIdFromParent(t.parent),
+            position: index,
+          }));
+        if (rows.length > 0) h.onReorder(rows);
       },
       onShowEditor: (ev: { id: unknown }) => {
         // Our own editor owns owner, group and the MASTER star.

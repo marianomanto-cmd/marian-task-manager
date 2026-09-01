@@ -25,6 +25,7 @@ import {
   deleteTimelineDependencyAction,
   deleteTimelineItemAction,
   renameTimelineAction,
+  reorderTimelineItemsAction,
   rescheduleTimelineItemsAction,
   updateTimelineDependencyAction,
   updateTimelineSettingsAction,
@@ -183,14 +184,18 @@ export function TimelinerBoard() {
       onDeleteItem: (id) => {
         void persist(() => deleteTimelineItemAction(id));
       },
-      onMoveItem: () => {
-        // Vertical order lives in SVAR's tree while the chart is mounted; the
-        // stored order is refreshed from the server on the next load.
-        qc.invalidateQueries({ queryKey: TIMELINER_KEY });
+      onReorder: (rows) => {
+        if (!selected) return;
+        void persist(() =>
+          reorderTimelineItemsAction({
+            timeline_id: selected.id,
+            items: rows,
+          }),
+        );
       },
       onEditItem: (item) => openEditor(item),
     }),
-    [selected, persist, qc],
+    [selected, persist],
   );
 
   // Item editor (create / edit), remounted per open so fields reset.
